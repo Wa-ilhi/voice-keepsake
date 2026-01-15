@@ -48,7 +48,7 @@ async function loadKeepsakes() {
       .createSignedUrl(k.audio_path, 60 * 60);
 
     k.audioUrl = signed.signedUrl;
-    k.qrDataUrl = await QRCode.toDataURL(`https://voice-keepsake.vercel.app/k/${k.id}`);
+    k.qrDataUrl = await QRCode.toDataURL(`https://voice-keepsake.vercel.app/listen/${k.id}`);
     k.currentTime = "0:00";
     k.duration = "0:00";
     playing.value[k.id] = false;
