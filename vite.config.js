@@ -11,5 +11,13 @@ export default defineConfig({
         }
       }
     })
-  ]
+  ],
+  base: '/', // Ensures correct path resolution
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: undefined,
+      },
+    },
+  },
 })
