@@ -12,7 +12,7 @@ export default defineConfig({
       }
     })
   ],
-  base: '/', // Ensures correct path resolution
+  base: '/login', // Ensures correct path resolution
   build: {
     rollupOptions: {
       output: {
