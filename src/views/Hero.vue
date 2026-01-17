@@ -1,13 +1,7 @@
 <template>
   <div class="relative min-h-screen bg-gradient-to-br from-pink-50 via-rose-100 to-purple-50 flex flex-col justify-center items-center text-center px-6 sm:px-10">
 
-    <!-- Floating Hearts -->
-    <div class="absolute top-0 left-0 w-full h-full pointer-events-none">
-      <span class="heart absolute text-rose-400 text-4xl" style="top:5%; left:10%">❤️</span>
-      <span class="heart absolute text-pink-400 text-3xl" style="top:25%; left:80%">💌</span>
-      <span class="heart absolute text-purple-400 text-4xl" style="top:55%; left:35%">💕</span>
-      <span class="heart absolute text-rose-400 text-3xl" style="top:75%; left:15%">💖</span>
-    </div>
+   
 
     <!-- Hero Content -->
     <div class="z-10 max-w-3xl">
@@ -28,12 +22,6 @@
           Create Your Keepsake
         </router-link>
 
-        <router-link
-          to="/dashboard"
-          class="px-10 py-4 border-2 border-rose-500 text-rose-500 font-semibold rounded-full hover:bg-rose-50 hover:shadow-md transition-all"
-        >
-          View Keepsakes
-        </router-link>
       </div>
 
      

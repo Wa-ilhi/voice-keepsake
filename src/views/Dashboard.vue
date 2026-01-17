@@ -6,12 +6,13 @@ import KeepsakeCard from '../views/KeepsakeCard.vue'
 const keepsakes = ref([])
 
 async function fetchKeepsakes() {
-  const { data:{ user } } = await supabase.auth.getUser()
-  if (!user) return
-  const { data, error } = await supabase.from('keepsakes')
+  // Fetch all public keepsakes
+  const { data, error } = await supabase
+    .from('keepsakes')
     .select('*')
-    .eq('user_id', user.id)
-    .order('created_at',{ ascending:false })
+    .eq('is_public', true)           // only public keepsakes
+    .order('created_at', { ascending: false }) // latest first
+
   if (error) console.error(error)
   else keepsakes.value = data
 }
@@ -42,14 +43,17 @@ onMounted(fetchKeepsakes)
       </div>
 
       <!-- Keepsakes Grid -->
-      <div v-else class="grid gap-6 sm:grid-cols-1 md:grid-cols-2">
-        <KeepsakeCard
-          v-for="k in keepsakes"
-          :key="k.id"
-          :keepsake="k"
-          :onDelete="deleteKeepsake"
-        />
-      </div>
+      <!-- Keepsakes Grid -->
+<div v-else class="grid gap-6 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
+
+  <KeepsakeCard
+    v-for="k in keepsakes"
+    :key="k.id"
+    :keepsake="k"
+    :onDelete="deleteKeepsake"
+  />
+</div>
+
 
     </div>
   </div>

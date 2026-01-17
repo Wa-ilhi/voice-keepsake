@@ -27,7 +27,7 @@ async function signIn() {
   if (error) status.value = error.message
   else {
     status.value = 'Logged in ✅'
-    router.push('/record') // redirect to dashboard
+    router.push('/dashboard') // redirect to dashboard
   }
 }
 </script>
