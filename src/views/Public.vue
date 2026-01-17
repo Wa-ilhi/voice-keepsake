@@ -4,19 +4,22 @@ import { useRoute } from "vue-router";
 import { supabase } from "../lib/supabase";
 import QRCode from "qrcode";
 import WaveSurfer from "wavesurfer.js";
+import bcrypt from "bcryptjs";
 import { Swiper, SwiperSlide } from "swiper/vue";
 import "swiper/css";
-import "swiper/css/pagination";
-import "swiper/css/navigation";
-
 
 const route = useRoute();
 const keepsakes = ref([]);
+const keepsake = ref(null);
 const wavesurfers = ref({});
 const playing = ref({});
 const activeMessageId = ref(null);
 const swiperRef = ref(null);
 const repeatMode = ref(0);
+const audioLoaded = ref(false);
+const enteredPin = ref("");
+const pinError = ref("");
+const qrDataUrl = ref("");
 
 function formatTime(seconds) {
   const m = Math.floor(seconds / 60);
@@ -24,31 +27,76 @@ function formatTime(seconds) {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-async function loadKeepsakes() {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return;
+// Load keepsake metadata (before PIN)
+async function loadKeepsake() {
+  const keepsakeId = route.params.id;
 
+  const { data, error } = await supabase
+    .from("keepsakes")
+    .select("*")
+    .eq("id", keepsakeId)
+    .single();
+
+  if (error || !data) {
+    console.error("Keepsake not found", error);
+    pinError.value = "Keepsake not found";
+    return;
+  }
+
+  keepsake.value = data;
+
+  // Generate QR code for sharing
+  qrDataUrl.value = await QRCode.toDataURL(
+    `https://voice-keepsake.vercel.app/listen/${keepsakeId}`
+  );
+}
+
+// Validate PIN and load audio
+async function submitPin() {
+  pinError.value = "";
+  if (!enteredPin.value) {
+    pinError.value = "Please enter a PIN";
+    return;
+  }
+
+  // Compare PIN with hash
+  const isValid = await bcrypt.compare(enteredPin.value, keepsake.value.pin_hashed);
+  if (!isValid) {
+    pinError.value = "Incorrect PIN";
+    
+    // Shake animation and auto-clear after delay
+    setTimeout(() => {
+      enteredPin.value = "";
+      pinError.value = "";
+    }, 800);
+    return;
+  }
+
+  // PIN is correct, load the audio player
+  audioLoaded.value = true;
+  await nextTick();
+  await loadKeepsakes();
+  pinError.value = "";
+}
+
+async function loadKeepsakes() {
   const keepsakeId = route.params.id;
 
   const { data } = await supabase
     .from("keepsakes")
     .select("*")
-    .eq("user_id", user.id)
-    .eq("id", keepsakeId)
-    .order("created_at", { ascending: false });
+    .eq("id", keepsakeId);
 
   if (!data) return;
 
-  // Attach audio URL, QR code, and initial states
+  // Process keepsakes
   for (let k of data) {
     const { data: signed } = await supabase.storage
       .from("keepsake-audio")
       .createSignedUrl(k.audio_path, 60 * 60);
 
     k.audioUrl = signed.signedUrl;
-    k.qrDataUrl = await QRCode.toDataURL(`https://voice-keepsake.vercel.app/listen/${k.id}`);
+    k.qrDataUrl = qrDataUrl.value;
     k.currentTime = "0:00";
     k.duration = "0:00";
     playing.value[k.id] = false;
@@ -56,10 +104,25 @@ async function loadKeepsakes() {
 
   keepsakes.value = data;
 
+  // Wait for DOM to fully render
   await nextTick();
+  
+  // Small delay to ensure Swiper is ready
+  setTimeout(() => {
+    initializeWaveSurfers();
+  }, 100);
+}
 
-  // Initialize WaveSurfer for each keepsake
+function initializeWaveSurfers() {
   keepsakes.value.forEach((k) => {
+    const container = document.querySelector(`#waveform-${k.id}`);
+    
+    // Check if container exists before creating WaveSurfer
+    if (!container) {
+      console.error(`Container #waveform-${k.id} not found`);
+      return;
+    }
+
     const ws = WaveSurfer.create({
       container: `#waveform-${k.id}`,
       waveColor: "#525252",
@@ -87,17 +150,10 @@ async function loadKeepsakes() {
 
     wavesurfers.value[k.id] = ws;
   });
-
-  // Set active keepsake from URL
-  const initialIndex = keepsakes.value.findIndex((k) => k.id === keepsakeId);
-  if (initialIndex >= 0) {
-    activeMessageId.value = keepsakeId;
-    swiperRef.value?.slideTo(initialIndex);
-  }
 }
 
 function toggleRepeat() {
-  repeatMode.value = 1 - repeatMode.value; // Direct toggle: 0 ↔ 1
+  repeatMode.value = 1 - repeatMode.value;
 }
 
 const repeatModeClass = computed(() => {
@@ -105,17 +161,13 @@ const repeatModeClass = computed(() => {
 });
 
 const repeatModeStyle = computed(() => {
-  if (repeatMode.value === 0) return { color: '#f9f9f9' }; // gray-300
-  return { color: '#1DB954' }; // spotify green for modes 1 and 2
+  return repeatMode.value === 0 ? { color: '#f9f9f9' } : { color: '#1DB954' };
 });
 
-// Handle logic in audio finish event
 function onAudioFinish(id) {
   if (repeatMode.value === 1) {
-    // Repeat is ON - replay current keepsake
     wavesurfers.value[id]?.play();
   } else {
-    // No repeat - just stop
     playing.value[id] = false;
   }
 }
@@ -135,13 +187,167 @@ function closeMessage() {
   activeMessageId.value = null;
 }
 
-onMounted(loadKeepsakes);
+function addDigit(num) {
+  if (enteredPin.value.length < 4) {
+    enteredPin.value += num.toString();
+    // Auto-submit when 4 digits are entered (optional)
+    if (enteredPin.value.length === 4) {
+      setTimeout(() => submitPin(), 300);
+    }
+  }
+}
+
+function deleteDigit() {
+  enteredPin.value = enteredPin.value.slice(0, -1);
+  pinError.value = "";
+}
+
+function clearPin() {
+  enteredPin.value = "";
+  pinError.value = "";
+}
+
+onMounted(loadKeepsake);
 </script>
+
 <template>
   <div
     class="min-h-screen bg-gradient-to-br from-purple-100 via-pink-100 to-rose-100 flex items-center justify-center px-4 py-6"
   >
+<!-- PIN Lock Screen (before unlock) - Cyberpunk Theme - Mobile Vertical -->
+<div 
+  v-if="!audioLoaded" 
+  class="cyberpunk-card bg-black/95 backdrop-blur-lg rounded-3xl shadow-2xl w-full max-w-sm p-6 sm:p-8 text-center relative overflow-hidden"
+>
+  <!-- Glowing border effect -->
+  <div class="absolute inset-0 rounded-3xl bg-gradient-to-r from-cyan-500 via-purple-500 to-pink-500 opacity-20 blur-xl"></div>
+  <div class="absolute inset-[2px] rounded-3xl bg-black"></div>
+  
+  <!-- Content -->
+  <div class="relative z-10">
+    <!-- Glitch effect title -->
+   <div class="relative z-10">
+  <!-- Circular Logo -->
+  <div class="logo-border mx-auto mb-3">
+     <video 
+    src="/src/assets/hero_dgk.mp4" 
+    autoplay 
+    loop 
+    muted 
+    playsinline
+    class="logo-video"
+  ></video>
+  </div>  
+
+</div>
+
+    
+   
+
+    <!-- PIN Display -->
+<div class="mb-6 w-full">
+  <div class="pin-display-container">
+    <div 
+      v-for="i in 4" 
+      :key="i"
+      class="pin-box"
+      :class="{
+        'filled': !pinError && enteredPin.length >= i,
+        'error': pinError
+      }"
+    >
+      <!-- Empty state - hollow circle -->
+      <ion-icon 
+        v-if="enteredPin.length < i" 
+        name="ellipse-outline"
+        :class="pinError ? 'text-red-400/50' : 'text-cyan-700/30'"
+        class="text-2xl"
+      ></ion-icon>
+      <!-- Filled state - filled circle -->
+      <ion-icon 
+        v-else
+        name="ellipse"
+        :class="pinError ? 'text-red-400' : 'text-cyan-400'"
+        class="text-2xl"
+      ></ion-icon>
+    </div>
+  </div>
+  <p class="text-cyan-500/60 text-[10px] font-mono tracking-widest text-center">Please enter your 4-digit code</p>
+</div>
+
+<!-- Remove the error message paragraph -->
+<!-- <p v-if="pinError" class="text-red-500 mt-3 font-mono text-xs animate-pulse px-2">
+  ⚠ {{ pinError }} ⚠
+</p> -->
+
+    <!-- Number Keypad - Vertical Grid -->
+   <!-- Number Keypad - iOS Style with CSS -->
+<div class="ios-keypad-container">
+  <!-- Row 1: 1 2 3 -->
+  <div class="ios-keypad-row">
+    <button
+      v-for="num in [1, 2, 3]"
+      :key="num"
+      @click="addDigit(num)"
+      class="ios-keypad-button"
+    >
+      {{ num }}
+    </button>
+  </div>
+
+  <!-- Row 2: 4 5 6 -->
+  <div class="ios-keypad-row">
+    <button
+      v-for="num in [4, 5, 6]"
+      :key="num"
+      @click="addDigit(num)"
+      class="ios-keypad-button"
+    >
+      {{ num }}
+    </button>
+  </div>
+
+  <!-- Row 3: 7 8 9 -->
+  <div class="ios-keypad-row">
+    <button
+      v-for="num in [7, 8, 9]"
+      :key="num"
+      @click="addDigit(num)"
+      class="ios-keypad-button"
+    >
+      {{ num }}
+    </button>
+  </div>
+
+  <!-- Row 4: Clear 0 Backspace -->
+        <div class="ios-keypad-row">
+        <!-- Clear Button -->
+        <button @click="clearPin" class="ios-keypad-clear">
+          <ion-icon name="close-circle-outline" class="text-2xl"></ion-icon>
+        </button>
+        
+        <!-- Zero Button -->
+        <button @click="addDigit(0)" class="ios-keypad-button">
+          0
+        </button>
+        
+        <!-- Backspace Button -->
+        <button @click="deleteDigit" class="ios-keypad-backspace">
+          <ion-icon name="backspace-outline" class="text-2xl"></ion-icon>
+        </button>
+      </div>
+      </div>
+
+    
+    
+ 
+
+  </div>
+</div>
+
+    <!-- Main Player (after unlock) -->
     <Swiper
+      v-else
       ref="swiperRef"
       :slides-per-view="1"
       class="w-full max-w-sm sm:max-w-md md:max-w-lg lg:max-w-4xl"
@@ -160,6 +366,7 @@ onMounted(loadKeepsakes);
               :src="k.qrDataUrl"
               class="album-art w-40 h-40 sm:w-48 sm:h-48 md:w-56 md:h-56 lg:w-60 lg:h-60 object-cover rounded-full mb-4"
               :class="{ spinning: playing[k.id] }"
+              alt="Keepsake QR Code"
             />
           </div>
 
@@ -258,6 +465,7 @@ onMounted(loadKeepsakes);
 <style scoped>
 /* ==================== Base Card Styles ==================== */
 .spotify-card {
+ 
   background: #000000;
   border-radius: 1rem;
   padding: 1.25rem;
@@ -573,5 +781,278 @@ onMounted(loadKeepsakes);
     max-width: 400px;
   }
 }
+
+
+
+@keyframes cardGlow {
+  0%, 100% {
+    box-shadow: 0 0 40px rgba(34, 211, 238, 0.2), 0 0 80px rgba(168, 85, 247, 0.1);
+  }
+  50% {
+    box-shadow: 0 0 60px rgba(168, 85, 247, 0.3), 0 0 100px rgba(34, 211, 238, 0.2);
+  }
+}
+
+.glitch-text {
+  position: relative;
+  animation: glitchText 5s infinite;
+  text-shadow: 
+    2px 2px 0px rgba(236, 72, 153, 0.3),
+    -2px -2px 0px rgba(34, 211, 238, 0.3);
+}
+
+@keyframes glitchText {
+  0%, 90%, 100% {
+    transform: translate(0);
+  }
+  92% {
+    transform: translate(-2px, 2px);
+  }
+  94% {
+    transform: translate(2px, -2px);
+  }
+  96% {
+    transform: translate(-2px, -2px);
+  }
+}
+
+
+
+@keyframes scanline {
+  0%, 100% {
+    text-shadow: 0 0 10px rgba(34, 211, 238, 0.5);
+  }
+  50% {
+    text-shadow: 0 0 20px rgba(34, 211, 238, 0.8);
+  }
+}
+
+/* Force PIN display to be horizontal */
+.pin-display-container {
+  display: flex !important;
+  flex-direction: row !important;
+  justify-content: center;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+  width: 100%;
+}
+
+.pin-box {
+  display: inline-flex !important;
+  width: 3rem;
+  height: 3rem; /* Changed to match width for perfect circle */
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s;
+  flex-shrink: 0;
+  border-radius: 50%; /* Makes it circular */
+}
+
+/* ==================== iOS PIN Keypad Styles ==================== */
+.ios-keypad-button {
+  width: 80px;
+  height: 80px;
+  background: rgba(159, 163, 164, 0.1);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(237, 91, 176, 0.2);
+  border-radius: 50%;
+  color: rgba(207, 250, 254, 0.9);
+  font-weight: 300;
+  font-size: 1.875rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto;
+  transition: all 0.15s ease;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+.ios-keypad-button:active {
+  background: rgba(133, 136, 137, 0.3);
+  transform: scale(0.95);
+}
+
+.ios-keypad-clear {
+  width: 80px;
+  height: 80px;
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  color: rgba(248, 113, 113, 0.9);
+  font-weight: 300;
+  font-size: 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto;
+  transition: all 0.15s ease;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+.ios-keypad-clear:active {
+  background: rgba(239, 68, 68, 0.2);
+  transform: scale(0.95);
+}
+
+.ios-keypad-backspace {
+  width: 80px;
+  height: 80px;
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  font-weight: 300;
+  font-size:1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto;
+  transition: all 0.15s ease;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+.ios-keypad-backspace:active {
+  background: rgba(117, 116, 118, 0.2);
+  transform: scale(0.95);
+}
+
+/* Keypad container */
+.ios-keypad-container {
+  max-width: 300px;
+  margin: 0 auto 1.5rem;
+}
+
+.ios-keypad-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.ios-keypad-row:last-child {
+  margin-bottom: 0;
+}
+
+/* Remove default button styles */
+.ios-keypad-button,
+.ios-keypad-clear,
+.ios-keypad-backspace {
+  outline: none;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* Haptic feedback simulation */
+@keyframes haptic {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(0.95); }
+}
+
+.ios-keypad-button:active,
+.ios-keypad-clear:active,
+.ios-keypad-backspace:active {
+  animation: haptic 0.1s ease;
+}
+
+/* Shake animation for incorrect PIN */
+
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
+  20%, 40%, 60%, 80% { transform: translateX(5px); }
+}
+
+.pin-box.shake {
+  animation: shake 0.5s ease;
+}
+
+/* Force PIN display to be horizontal */
+.pin-display-container {
+  display: flex !important;
+  flex-direction: row !important;
+  justify-content: center;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+  width: 100%;
+}
+
+.pin-box {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s;
+  flex-shrink: 0;
+}
+
+/* Filled state */
+.pin-box.filled {
+  border-color: rgb(34, 211, 238);
+  box-shadow: 0 0 10px rgba(34, 211, 238, 0.5);
+  background: rgba(6, 182, 212, 0.2);
+}
+
+/* Error state */
+.pin-box.error {
+  border-color: rgb(248, 113, 113);
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.5);
+  background: rgba(220, 38, 38, 0.2);
+  animation: shake 0.5s ease;
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  10%, 30%, 50%, 70%, 90% { transform: translateX(-8px); }
+  20%, 40%, 60%, 80% { transform: translateX(8px); }
+}
+
+.logo-border {
+  width: 80vw;        /* responsive width relative to viewport */
+  max-width: 400px;   /* prevents it from being too large on big screens */
+  height: auto;       /* height adjusts based on content */
+  aspect-ratio: 16/9; /* maintains rectangular proportion */
+  border-radius: 8px;
+  padding: 4px;   
+  background: linear-gradient(135deg, #9d9d9d, #f6a7b4, #FFC1E3); 
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 8px 20px rgba(0,0,0,0.2); 
+  transition: transform 0.3s ease;
+  margin: 2rem auto;  /* centers horizontally and adds spacing */
+}
+
+
+
+.logo-border:hover {
+  transform: scale(1.05); /* small hover pop effect */
+}
+
+/* Image inside the border */
+.logo-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 10px;
+}
+
+.logo-video {
+  width: 100%;        /* fill the container width */
+  height: 100%;       /* fill the container height */
+  object-fit: cover;  /* maintain aspect ratio, crop if needed */
+  border-radius: 8px; /* optional, match container */
+  display: block;
+}
+
+
 
 </style>
