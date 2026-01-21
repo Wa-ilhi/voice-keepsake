@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, nextTick, computed } from "vue";
+import { ref, onMounted, nextTick, computed, watch  } from "vue";
 import { useRoute } from "vue-router";
 import { supabase } from "../lib/supabase";
 import QRCode from "qrcode";
@@ -7,6 +7,9 @@ import WaveSurfer from "wavesurfer.js";
 import bcrypt from "bcryptjs";
 import { Swiper, SwiperSlide } from "swiper/vue";
 import "swiper/css";
+import { gsap } from "gsap";
+import paperTexture from "../assets/crumbled.jpg";
+
 
 const route = useRoute();
 const keepsakes = ref([]);
@@ -20,6 +23,9 @@ const audioLoaded = ref(false);
 const enteredPin = ref("");
 const pinError = ref("");
 const qrDataUrl = ref("");
+const envelope = ref(null);
+const flap = ref(null);
+const sheet = ref(null);
 
 function formatTime(seconds) {
   const m = Math.floor(seconds / 60);
@@ -45,11 +51,24 @@ async function loadKeepsake() {
 
   keepsake.value = data;
 
-  // Generate QR code for sharing
-  qrDataUrl.value = await QRCode.toDataURL(
-    `https://voice-keepsake.vercel.app/listen/${keepsakeId}`
-  );
+  // 🔹 Replace QR completely with uploaded image
+  if (data.image_path) {
+    // Generate public URL for the image in Supabase storage
+    const { data: signedUrlData, error: signedError } = await supabase
+  .storage
+  .from('keepsake-images')
+  .createSignedUrl(data.image_path, 60 * 60); // 1 hour expiry
+
+if (signedError) {
+  console.error("Signed URL error:", signedError);
+} else {
+  qrDataUrl.value = signedUrlData.signedUrl;
 }
+
+} 
+
+}
+
 
 // Validate PIN and load audio
 async function submitPin() {
@@ -183,9 +202,36 @@ function openMessage(k) {
   activeMessageId.value = k.id;
 }
 
-function closeMessage() {
-  activeMessageId.value = null;
-}
+// function closeMessage() {
+//   activeMessageId.value = null;
+// }
+
+const openEnvelope = async () => {
+  await nextTick();
+
+  gsap.set(flap.value, { rotateX: 0 });
+  gsap.set(sheet.value, { y: 20, opacity: 0 });
+
+  gsap.timeline()
+    .to(flap.value, { rotateX: -180, duration: 0.8, ease: "power2.inOut" })
+    .to(sheet.value, { y: 0, opacity: 1, duration: 0.1, ease: "power2.out" }, "-=0.3");
+};
+
+const closeEnvelope = () => {
+  gsap.timeline()
+    .to(sheet.value, { y: 20, opacity: 0, duration: 0.1 })
+    .to(flap.value, { rotateX: 0, duration: 0.1, ease: "power2.inOut" }, "-=0.2")
+    .then(() => activeMessageId.value = null);
+};
+
+
+
+// Watch activeMessageId to trigger opening
+watch(activeMessageId, (val) => {
+  if (val !== null) {
+    openEnvelope();
+  }
+});
 
 function addDigit(num) {
   if (enteredPin.value.length < 4) {
@@ -361,14 +407,21 @@ onMounted(loadKeepsake);
               Voice Keepsake
             </div>
 
-            <!-- Album Art -->
+            <!-- Uploaded Image (replacing QR) -->
             <img
+              v-if="k.qrDataUrl"
               :src="k.qrDataUrl"
               class="album-art w-40 h-40 sm:w-48 sm:h-48 md:w-56 md:h-56 lg:w-60 lg:h-60 object-cover rounded-full mb-4"
               :class="{ spinning: playing[k.id] }"
-              alt="Keepsake QR Code"
+              alt="Keepsake Image"
             />
+
+            <!-- Optional placeholder if no image -->
+            <div v-else class="w-40 h-40 sm:w-48 sm:h-48 md:w-56 md:h-56 lg:w-60 lg:h-60 bg-gray-700 rounded-full flex items-center justify-center mb-4">
+              <span class="text-gray-300">No Image</span>
+            </div>
           </div>
+
 
           <!-- Desktop: Right side - Controls -->
           <div class="controls-section">
@@ -438,24 +491,32 @@ onMounted(loadKeepsake);
           </div>
 
           <!-- Overlay inside card -->
-          <div v-if="activeMessageId === k.id" class="message-overlay">
-            <div class="overlay-bg" @click="closeMessage"></div>
-            <div class="overlay-sheet">
-              <div class="drag-handle"></div>
-              <h3 class="text-lg sm:text-xl font-semibold text-white">
-                {{ k.title }}
-              </h3>
-              <p class="text-sm sm:text-base text-gray-200 mt-2">
-                {{ k.message }}
-              </p>
-              <button
-                @click="closeMessage"
-                class="mt-4 px-4 py-2 bg-white/20 text-white rounded-xl hover:bg-white/30 transition"
-              >
-                Close
-              </button>
-            </div>
-          </div>
+        <div v-if="activeMessageId === k.id" class="message-overlay">
+  <div class="overlay-bg" @click="closeEnvelope"></div>
+
+  <div class="overlay-envelope">
+    <!-- Envelope back -->
+    <div class="envelope-back" :style="{ backgroundImage: `url(${paperTexture})` }"></div>
+
+    <!-- Letter sheet -->
+    <div class="overlay-sheet" ref="sheet">
+      <div class="drag-handle"></div>
+      <h3 class="title">{{ k.title }}</h3>
+      <p>{{ k.message }}</p>
+      <button @click="closeEnvelope">Close</button>
+    </div>
+
+    <!-- Envelope front -->
+    <div class="envelope-front"></div>
+
+    <!-- Flap -->
+    <div class="envelope-flap" ref="flap"></div>
+  </div>
+</div>
+
+
+
+
         </div>
       </SwiperSlide>
     </Swiper>
@@ -471,10 +532,12 @@ onMounted(loadKeepsake);
   padding: 1.25rem;
   box-shadow: 0 25px 50px rgba(0, 0, 0, 0.15);
   font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
-  display: flex;
   flex-direction: column;
   align-items: center;
+  margin-top: 1rem auto; 
 }
+
+
 
 /* ==================== Header ==================== */
 /* ==================== Header ==================== */
@@ -494,6 +557,11 @@ onMounted(loadKeepsake);
     font-size: 0.85rem;
     margin-bottom: 1rem;
   }
+  .spotify-card {
+    padding: 1.5rem;
+    border-radius: 1.25rem;
+    max-width: 540px;
+  }
 }
 
 /* Tablets */
@@ -501,6 +569,12 @@ onMounted(loadKeepsake);
   .header {
     font-size: 0.9rem;
     margin-bottom: 1.25rem;
+  }
+  .spotify-card {
+    padding: 2rem;
+    border-radius: 1.5rem;
+    box-shadow: 0 30px 60px rgba(0, 0, 0, 0.2);
+    max-width: 720px;
   }
 }
 
@@ -521,8 +595,8 @@ onMounted(loadKeepsake);
 
 /* ==================== Album Art ==================== */
 .album-art {
-  width: 100%;
-  max-width: 280px;
+  width: 90%;
+  max-width: 270px;
   aspect-ratio: 1;
   border-radius: 50%;
   object-fit: cover;
@@ -579,7 +653,7 @@ onMounted(loadKeepsake);
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 1.5rem;
+  gap: 2rem;
   margin-top: 1.25rem;
   width: 100%;
 }
@@ -608,83 +682,99 @@ onMounted(loadKeepsake);
 }
 
 .spotify-card .controls .play ion-icon {
-  font-size: 2.5rem;
+  font-size: 3.5rem;
+}
+.spotify-card .controls .icon ion-icon {
+  font-size: 1.5rem;
 }
 
 /* ==================== Message Overlay ==================== */
 .message-overlay {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  width: 100%;
-  height: 50%;
-  min-height: 180px;
-  max-height: 400px;
+  position: fixed;
+  inset: 0;
   display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  pointer-events: none;
-  transition: height 0.3s ease;
+  justify-content: center;
+  align-items: center;
+  z-index: 50;
 }
 
-.overlay-sheet {
+.overlay-bg {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+}
+
+/* Envelope container */
+.overlay-envelope {
   position: relative;
-  background: rgba(255, 255, 255, 0.1);
-  backdrop-filter: blur(15px) saturate(180%);
-  -webkit-backdrop-filter: blur(15px) saturate(180%);
-  border-radius: 2rem 2rem 0 0;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  padding: 1.5rem;
-  pointer-events: auto;
-  z-index: 10;
-  display: flex;
-  flex-direction: column;
+  width: 300px;
+  height: 400px;
+  perspective: 800px; /* for 3D flap rotation */
+   justify-content: center;
   align-items: center;
-  animation: slide-up 0.3s ease-out;
-  color: #fff;
-  overflow-y: auto;
+}
+
+/* Envelope body (rectangle) */
+.envelope-back {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: #f5f5dc; /* light paper color */
+  border-radius: 8px;
+  z-index: 1;
+
+  /* Crumpled effect */
+
+  background-size: cover;
+  background-repeat: repeat;
+  filter: contrast(1.2) brightness(1.05);
+  box-shadow: inset 0 4px 10px rgba(0,0,0,0.2);
+}
+
+
+
+
+
+
+/* Letter sheet inside */
+.overlay-sheet {
+  position: fixed; /* full-screen overlay */
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+
+  
+  border-radius: 0;  /* full-screen, no rounded corners */
+  padding: 40px;     /* extra padding for readability */
+  z-index: 2;
+
+  /* Handwritten style */
+  font-family: "Indie Flower", cursive;
+  font-weight: 400;
+  font-style: normal;
+  line-height: 1.6;
+  color: #2a2a2a;
+  letter-spacing: 0.5px;
+  white-space: pre-wrap; /* preserve line breaks */
+  transform: rotate(-0.5deg);
   text-align: justify;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.4) transparent;
+
+  overflow-y: auto;   /* scroll if content is too long */
+  box-sizing: border-box;
 }
 
 .overlay-sheet::-webkit-scrollbar {
-  width: 6px;
-}
-
-.overlay-sheet::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 3px;
+  width: 8px;
 }
 
 .overlay-sheet::-webkit-scrollbar-thumb {
-  background-color: rgba(255, 255, 255, 0.4);
-  border-radius: 3px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  background-color: rgba(0,0,0,0.2);
+  border-radius: 4px;
 }
 
-.overlay-sheet::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(255, 255, 255, 0.6);
-}
-
-.drag-handle {
-  width: 40px;
-  height: 5px;
-  background: #ccc;
-  border-radius: 5px;
-  margin-bottom: 1rem;
-}
-
-@keyframes slide-up {
-  from {
-    transform: translateY(100%);
-    opacity: 0;
-  }
-  to {
-    transform: translateY(0);
-    opacity: 1;
-  }
-}
 
 /* ==================== Responsive: Small Devices ==================== */
 @media (min-width: 576px) {
@@ -692,6 +782,7 @@ onMounted(loadKeepsake);
     padding: 1.5rem;
     border-radius: 1.25rem;
     align-items: center;
+    margin-top: 1rem;
   }
 }
 
@@ -712,6 +803,7 @@ onMounted(loadKeepsake);
     border-radius: 1.5rem;
     box-shadow: 0 30px 60px rgba(0, 0, 0, 0.2);
     align-items: center;
+    margin-top: 1rem;
   }
   
   .message-overlay {
@@ -762,6 +854,7 @@ onMounted(loadKeepsake);
     gap: 4rem;
     padding: 3rem 4rem;
     max-width: 1100px;
+    margin-top: 1rem;
   }
   
   .album-art {

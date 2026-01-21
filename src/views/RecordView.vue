@@ -21,6 +21,11 @@ const isPlaying = ref(false);
 const currentTime = ref(0);
 const duration = ref(0);
 
+const imageFile = ref(null);
+const imageUrl = ref(null);
+const imageName = ref("");
+const isUploadingImage = ref(false);
+
 async function startRecording() {
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
   recorder.value = new MediaRecorder(stream, { mimeType: 'audio/webm' })
@@ -29,6 +34,21 @@ async function startRecording() {
   recording.value = true
   status.value = 'Recording your voice…'
 }
+
+function handleImageUpload(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  imageFile.value = file;
+  imageName.value = file.name; // just the filename
+}
+
+// Remove the selected file
+function removeImage() {
+  imageFile.value = null;
+  imageName.value = "";
+}
+
 
 function stopRecording() {
   recorder.value.stop()
@@ -99,79 +119,97 @@ function deleteRecording() {
       audioPlayerElement.value.pause();
     }
     audioUrl.value = null;
-    audioFile.value = null;
+    // audioFile.value = null;
     isPlaying.value = false;
     currentTime.value = 0;
     duration.value = 0;
   }
 }
 async function saveKeepsake() {
-  if (!audioBlob.value || !pin.value || pin.value.length < 4) {
-    status.value = 'Please add a PIN and record audio'
-    return
+  if ((!audioBlob.value && !imageFile.value) || !pin.value || pin.value.length < 4) {
+    status.value = 'Please add a PIN and record audio or upload an image';
+    return;
   }
 
-  isSaving.value = true
-  isSaved.value = false
+  isSaving.value = true;
+  isSaved.value = false;
   status.value = '';
 
   try {
-    const id = crypto.randomUUID()
-    const path = `${id}.webm`
+    const id = crypto.randomUUID();
 
     // hash PIN
-    const pinHash = await bcrypt.hash(pin.value, 10)
+    const pinHash = await bcrypt.hash(pin.value, 10);
 
-    // upload audio
-    const { error: uploadError } = await supabase.storage
-      .from('keepsake-audio')
-      .upload(path, audioBlob.value, {
-        contentType: 'audio/webm'
-      })
+    let audioPath = null;
+    let imagePath = null;
 
-    if (uploadError) {
-      status.value = 'Failed to upload audio'
-      return
+    // Upload audio
+    if (audioBlob.value) {
+      audioPath = `${id}.webm`;
+      const { error: uploadError } = await supabase.storage
+        .from('keepsake-audio')
+        .upload(audioPath, audioBlob.value, { contentType: 'audio/webm' });
+
+      if (uploadError) {
+        status.value = 'Failed to upload audio';
+        return;
+      }
     }
 
-    // save metadata
+    // Upload image
+    if (imageFile.value) {
+      imagePath = `${id}-${imageFile.value.name}`;
+      const { error: imgError } = await supabase.storage
+        .from('keepsake-images')
+        .upload(imagePath, imageFile.value, { contentType: imageFile.value.type });
+
+      if (imgError) {
+        status.value = 'Failed to upload image';
+        return;
+      }
+    }
+
+    // Save metadata
     const { error } = await supabase.from('keepsakes').insert({
       id,
       title: title.value,
       message: message.value,
-      audio_path: path,
+      audio_path: audioPath,
+      image_path: imagePath,
       pin_hashed: pinHash,
-      is_public: true
-    })
+      is_public: true,
+    });
 
     if (error) {
-      status.value = 'Failed to save keepsake'
-      return
+      status.value = 'Failed to save keepsake';
+      return;
     }
 
     // Success
-    status.value = 'Recording saved successfully!'
-    isSaved.value = true
+    status.value = 'Recording saved successfully!';
+    isSaved.value = true;
 
-    // ✅ Reset all input and audio after success
-    audioBlob.value = null
-    pin.value = ''
-    title.value = ''
-    message.value = ''
+    // Reset
+    audioBlob.value = null;
+    imageFile.value = null;
+    imageUrl.value = null;
+    pin.value = '';
+    title.value = '';
+    message.value = '';
 
   } catch (err) {
-    console.error(err)
-    status.value = 'An unexpected error occurred'
+    console.error(err);
+    status.value = 'An unexpected error occurred';
   } finally {
-    isSaving.value = false
-
-    // Optional: reset "SAVED" button after 3 seconds
+    isSaving.value = false;
     setTimeout(() => {
-      isSaved.value = false
-      status.value = ''  // clear status if desired
-    }, 3000)
+      isSaved.value = false;
+      status.value = '';
+    }, 3000);
   }
 }
+
 
 </script>
 
@@ -299,19 +337,19 @@ async function saveKeepsake() {
 
           <div class="space-y-4 mt-4">
             <div class="input-group">
-              <label class="input-label">TRACK TITLE</label>
+              <label class="input-label">Salutation</label>
               <input
                 v-model="title"
-                placeholder="e.g., Message for My Love"
+                placeholder="e.g., Dearest Love,"
                 class="studio-input"
               />
             </div>
 
             <div class="input-group">
-              <label class="input-label">Track Message</label>
+              <label class="input-label">Message</label>
               <textarea
                 v-model="message"
-                placeholder="Add message about this recording..."
+                placeholder="Add message..."
                 rows="3"
                 class="studio-input resize-none"
               />
@@ -348,7 +386,32 @@ async function saveKeepsake() {
             </div>
 
           </div>
+              <div class="input-group mt-4">
+  <label class="input-label">Attach an Image (optional)</label>
+  <input
+    type="file"
+    accept="image/*"
+    @change="handleImageUpload"
+    class="studio-input"
+  />
+
+  <!-- Show only the filename like Gmail -->
+  <div v-if="imageName" class="image-filename mt-2 flex items-center gap-2">
+    <span class="text-gray-200 bg-gray-800 px-2 py-1 rounded">
+      {{ imageName }}
+    </span>
+    <button
+      @click="removeImage"
+      class="text-sm text-red-500 hover:underline"
+    >
+      Remove
+    </button>
+  </div>
+</div>
+
         </div>
+
+   
 
         <!-- Export/Save Section -->
       <div class="export-section">
@@ -400,13 +463,14 @@ async function saveKeepsake() {
 </template>
 
 <style scoped>
+
 .studio-header {
   text-align: center;
   margin-bottom: .5rem;
   padding: .5rem;
   background: rgba(0, 0, 0, 0.5);
   border-radius: 1rem;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.596);
 }
 
 .studio-panel {
