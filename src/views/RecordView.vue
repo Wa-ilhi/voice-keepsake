@@ -146,7 +146,7 @@ async function saveKeepsake() {
 
     // Generate unique salt for this keepsake
     const salt = generateSalt();
-    
+
     // Derive encryption key from PIN + salt (client-side only)
     const encryptionKey = deriveKeyFromPin(pin.value, salt);
 
@@ -156,20 +156,24 @@ async function saveKeepsake() {
     let audioPath = null;
     let imagePath = null;
 
+    // -----------------------------
     // Upload encrypted audio
+    // -----------------------------
     if (audioBlob.value) {
       status.value = '🔐 Encrypting audio...';
-      
-      // Encrypt the audio file
-      const encryptedAudioBlob = await encryptAudioBlob(audioBlob.value, encryptionKey);
-      
+
+      const encryptedAudioArrayBuffer = await encryptAudioBlob(audioBlob.value, encryptionKey);
+      const encryptedAudioBlob = new Blob([encryptedAudioArrayBuffer], {
+        type: 'application/octet-stream'
+      });
+
       audioPath = `${id}_encrypted.enc`;
-      
+
       status.value = '📤 Uploading encrypted audio...';
-      
+
       const { error: uploadError } = await supabase.storage
         .from('keepsake-audio')
-        .upload(audioPath, encryptedAudioBlob, { 
+        .upload(audioPath, encryptedAudioBlob, {
           contentType: 'application/octet-stream',
           cacheControl: '3600'
         });
@@ -181,25 +185,28 @@ async function saveKeepsake() {
       }
     }
 
+    // -----------------------------
     // Upload encrypted image
+    // -----------------------------
     if (imageFile.value) {
       status.value = '🔐 Encrypting image...';
-      
-      // Convert image file to blob if needed
+
       const imageBlob = imageFile.value instanceof Blob 
         ? imageFile.value 
         : new Blob([imageFile.value], { type: imageFile.value.type });
-      
-      // Encrypt the image file
-      const encryptedImageBlob = await encryptAudioBlob(imageBlob, encryptionKey);
-      
+
+      const encryptedImageArrayBuffer = await encryptAudioBlob(imageBlob, encryptionKey);
+      const encryptedImageBlob = new Blob([encryptedImageArrayBuffer], { 
+        type: 'application/octet-stream' 
+      });
+
       imagePath = `${id}_img_encrypted.enc`;
-      
+
       status.value = '📤 Uploading encrypted image...';
-      
+
       const { error: imgError } = await supabase.storage
         .from('keepsake-images')
-        .upload(imagePath, encryptedImageBlob, { 
+        .upload(imagePath, encryptedImageBlob, {
           contentType: 'application/octet-stream',
           cacheControl: '3600'
         });
@@ -209,11 +216,15 @@ async function saveKeepsake() {
         console.error('Image upload error:', imgError);
         return;
       }
+
+      
     }
 
+    // -----------------------------
+    // Save metadata in DB
+    // -----------------------------
     status.value = '💾 Saving keepsake...';
 
-    // Save metadata with salt (NOT the encryption key)
     const { error } = await supabase.from('keepsakes').insert({
       id,
       title: title.value,
@@ -221,7 +232,7 @@ async function saveKeepsake() {
       audio_path: audioPath,
       image_path: imagePath,
       pin_hashed: pinHash,
-      encryption_key: salt, // Only store the salt
+      encryption_key: salt, // only store salt
       is_public: true,
       created_at: new Date().toISOString(),
     });
@@ -232,19 +243,18 @@ async function saveKeepsake() {
       return;
     }
 
-    // Generate the shareable link
+    // Generate shareable link
     shareableLink.value = `${window.location.origin}/listen/${id}`;
     savedPin.value = pin.value;
 
-    // Success
     status.value = '✅ Keepsake saved securely!';
     isSaved.value = true;
 
-    // Optional: Copy link to clipboard
+    // Optional: copy link to clipboard
     try {
       await navigator.clipboard.writeText(shareableLink.value);
       status.value = '✅ Link copied to clipboard!';
-    } catch (err) {
+    } catch {
       console.log('Could not copy to clipboard');
     }
 
