@@ -2,6 +2,8 @@
 import { ref, computed } from 'vue'
 import { supabase } from '../lib/supabase'
 import bcrypt from 'bcryptjs'
+import { encryptAudioBlob, deriveKeyFromPin, generateSalt } from '../lib/encryption';
+
 
 const recording = ref(false)
 const recorder = ref(null)
@@ -24,7 +26,9 @@ const duration = ref(0);
 const imageFile = ref(null);
 const imageUrl = ref(null);
 const imageName = ref("");
-const isUploadingImage = ref(false);
+const shareableLink = ref('');
+const savedPin = ref('');
+const copied = ref(false);
 
 async function startRecording() {
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
@@ -138,39 +142,78 @@ async function saveKeepsake() {
   try {
     const id = crypto.randomUUID();
 
-    // hash PIN
+    status.value = '🔐 Generating encryption keys...';
+
+    // Generate unique salt for this keepsake
+    const salt = generateSalt();
+    
+    // Derive encryption key from PIN + salt (client-side only)
+    const encryptionKey = deriveKeyFromPin(pin.value, salt);
+
+    // Hash PIN for authentication (separate from encryption)
     const pinHash = await bcrypt.hash(pin.value, 10);
 
     let audioPath = null;
     let imagePath = null;
 
-    // Upload audio
+    // Upload encrypted audio
     if (audioBlob.value) {
-      audioPath = `${id}.webm`;
+      status.value = '🔐 Encrypting audio...';
+      
+      // Encrypt the audio file
+      const encryptedAudioBlob = await encryptAudioBlob(audioBlob.value, encryptionKey);
+      
+      audioPath = `${id}_encrypted.enc`;
+      
+      status.value = '📤 Uploading encrypted audio...';
+      
       const { error: uploadError } = await supabase.storage
         .from('keepsake-audio')
-        .upload(audioPath, audioBlob.value, { contentType: 'audio/webm' });
+        .upload(audioPath, encryptedAudioBlob, { 
+          contentType: 'application/octet-stream',
+          cacheControl: '3600'
+        });
 
       if (uploadError) {
         status.value = 'Failed to upload audio';
+        console.error('Audio upload error:', uploadError);
         return;
       }
     }
 
-    // Upload image
+    // Upload encrypted image
     if (imageFile.value) {
-      imagePath = `${id}-${imageFile.value.name}`;
+      status.value = '🔐 Encrypting image...';
+      
+      // Convert image file to blob if needed
+      const imageBlob = imageFile.value instanceof Blob 
+        ? imageFile.value 
+        : new Blob([imageFile.value], { type: imageFile.value.type });
+      
+      // Encrypt the image file
+      const encryptedImageBlob = await encryptAudioBlob(imageBlob, encryptionKey);
+      
+      imagePath = `${id}_img_encrypted.enc`;
+      
+      status.value = '📤 Uploading encrypted image...';
+      
       const { error: imgError } = await supabase.storage
         .from('keepsake-images')
-        .upload(imagePath, imageFile.value, { contentType: imageFile.value.type });
+        .upload(imagePath, encryptedImageBlob, { 
+          contentType: 'application/octet-stream',
+          cacheControl: '3600'
+        });
 
       if (imgError) {
         status.value = 'Failed to upload image';
+        console.error('Image upload error:', imgError);
         return;
       }
     }
 
-    // Save metadata
+    status.value = '💾 Saving keepsake...';
+
+    // Save metadata with salt (NOT the encryption key)
     const { error } = await supabase.from('keepsakes').insert({
       id,
       title: title.value,
@@ -178,36 +221,64 @@ async function saveKeepsake() {
       audio_path: audioPath,
       image_path: imagePath,
       pin_hashed: pinHash,
+      encryption_key: salt, // Only store the salt
       is_public: true,
+      created_at: new Date().toISOString(),
     });
 
     if (error) {
       status.value = 'Failed to save keepsake';
+      console.error('Database error:', error);
       return;
     }
 
+    // Generate the shareable link
+    shareableLink.value = `${window.location.origin}/listen/${id}`;
+    savedPin.value = pin.value;
+
     // Success
-    status.value = 'Recording saved successfully!';
+    status.value = '✅ Keepsake saved securely!';
     isSaved.value = true;
 
-    // Reset
-    audioBlob.value = null;
-    imageFile.value = null;
-    imageUrl.value = null;
-    pin.value = '';
-    title.value = '';
-    message.value = '';
+    // Optional: Copy link to clipboard
+    try {
+      await navigator.clipboard.writeText(shareableLink.value);
+      status.value = '✅ Link copied to clipboard!';
+    } catch (err) {
+      console.log('Could not copy to clipboard');
+    }
 
   } catch (err) {
-    console.error(err);
-    status.value = 'An unexpected error occurred';
+    console.error('Save error:', err);
+    status.value = 'An unexpected error occurred: ' + err.message;
   } finally {
     isSaving.value = false;
-    setTimeout(() => {
-      isSaved.value = false;
-      status.value = '';
-    }, 3000);
   }
+}
+
+async function copyLink() {
+  try {
+    await navigator.clipboard.writeText(shareableLink.value);
+    copied.value = true;
+    setTimeout(() => {
+      copied.value = false;
+    }, 2000);
+  } catch (err) {
+    console.log('Copy failed:', err);
+  }
+}
+
+function createAnother() {
+  shareableLink.value = '';
+  savedPin.value = '';
+  audioBlob.value = null;
+  imageFile.value = null;
+  imageUrl.value = null;
+  pin.value = '';
+  title.value = '';
+  message.value = '';
+  status.value = '';
+  isSaved.value = false;
 }
 
 

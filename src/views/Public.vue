@@ -9,6 +9,7 @@ import { Swiper, SwiperSlide } from "swiper/vue";
 import "swiper/css";
 import { gsap } from "gsap";
 import paperTexture from "../assets/crumbled.jpg";
+import { decryptAudioBlob, deriveKeyFromPin } from '../lib/encryption';
 
 
 const route = useRoute();
@@ -26,6 +27,8 @@ const qrDataUrl = ref("");
 const envelope = ref(null);
 const flap = ref(null);
 const sheet = ref(null);
+const loading = ref(true);
+const pinEntered = ref(false);
 
 function formatTime(seconds) {
   const m = Math.floor(seconds / 60);
@@ -34,6 +37,7 @@ function formatTime(seconds) {
 }
 
 // Load keepsake metadata (before PIN)
+// Load a single keepsake (for Public view)
 async function loadKeepsake() {
   const keepsakeId = route.params.id;
 
@@ -51,23 +55,24 @@ async function loadKeepsake() {
 
   keepsake.value = data;
 
-  // 🔹 Replace QR completely with uploaded image
+  // ✅ If image exists, fetch signed URL
   if (data.image_path) {
-    // Generate public URL for the image in Supabase storage
     const { data: signedUrlData, error: signedError } = await supabase
-  .storage
-  .from('keepsake-images')
-  .createSignedUrl(data.image_path, 60 * 60); // 1 hour expiry
+      .storage
+      .from("keepsake-images")
+      .createSignedUrl(data.image_path, 60 * 60); // 1 hour expiry
 
-if (signedError) {
-  console.error("Signed URL error:", signedError);
-} else {
-  qrDataUrl.value = signedUrlData.signedUrl;
+    if (signedError) {
+      console.error("Signed URL error:", signedError);
+      keepsake.value.imageUrl = null;
+    } else {
+      keepsake.value.imageUrl = signedUrlData.signedUrl;
+    }
+  } else {
+    keepsake.value.imageUrl = null;
+  }
 }
 
-} 
-
-}
 
 
 // Validate PIN and load audio
@@ -78,59 +83,120 @@ async function submitPin() {
     return;
   }
 
-  // Compare PIN with hash
-  const isValid = await bcrypt.compare(enteredPin.value, keepsake.value.pin_hashed);
-  if (!isValid) {
-    pinError.value = "Incorrect PIN";
-    
-    // Shake animation and auto-clear after delay
-    setTimeout(() => {
-      enteredPin.value = "";
-      pinError.value = "";
-    }, 800);
-    return;
-  }
+  try {
+    // Compare PIN with hash
+    const isValid = await bcrypt.compare(enteredPin.value, keepsake.value.pin_hashed);
+    if (!isValid) {
+      pinError.value = "Incorrect PIN";
+      
+      // Shake animation and auto-clear after delay
+      setTimeout(() => {
+        enteredPin.value = "";
+        pinError.value = "";
+      }, 800);
+      return;
+    }
 
-  // PIN is correct, load the audio player
-  audioLoaded.value = true;
-  await nextTick();
-  await loadKeepsakes();
-  pinError.value = "";
+    // PIN is correct, load and decrypt the audio
+
+    pinEntered.value = true;
+    loading.value = true;
+
+    audioLoaded.value = true;
+    await nextTick();
+    await loadKeepsakes();
+    pinError.value = "";
+
+    loading.value = false;
+    
+  } catch (error) {
+    console.error('PIN validation error:', error);
+    pinError.value = "Error validating PIN";
+  }
 }
 
+// Load multiple keepsakes (used when rendering a list)
 async function loadKeepsakes() {
   const keepsakeId = route.params.id;
 
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("keepsakes")
     .select("*")
     .eq("id", keepsakeId);
 
-  if (!data) return;
-
-  // Process keepsakes
-  for (let k of data) {
-    const { data: signed } = await supabase.storage
-      .from("keepsake-audio")
-      .createSignedUrl(k.audio_path, 60 * 60);
-
-    k.audioUrl = signed.signedUrl;
-    k.qrDataUrl = qrDataUrl.value;
-    k.currentTime = "0:00";
-    k.duration = "0:00";
-    playing.value[k.id] = false;
+  if (error || !data) {
+    console.error("Keepsakes not found", error);
+    pinError.value = "Keepsakes not found";
+    keepsakes.value = [];
+    return;
   }
 
-  keepsakes.value = data;
+  // Make keepsakes reactive and initialize fields
+  keepsakes.value = data.map(k => ({
+    ...k,
+    audioUrl: null,
+    imageUrl: null,
+    currentTime: "0:00",
+    duration: "0:00"
+  }));
 
-  // Wait for DOM to fully render
+  // Process each keepsake
+  for (const k of keepsakes.value) {
+    try {
+      // Skip legacy records with missing salt
+      if (!k.encryption_key) throw new Error("This keepsake has no salt");
+
+      // 🔹 Decrypt audio if it exists
+      if (k.audio_path) {
+        const { data: encryptedBlob, error: downloadError } =
+          await supabase.storage
+            .from("keepsake-audio")
+            .download(k.audio_path);
+
+        if (downloadError) throw downloadError;
+
+        const decryptionKey = deriveKeyFromPin(
+          enteredPin.value,
+          k.encryption_key
+        );
+
+        const decryptedBlob = await decryptAudioBlob(encryptedBlob, decryptionKey);
+        k.audioUrl = URL.createObjectURL(decryptedBlob);
+      }
+
+      // 🔹 Fetch signed URL for image if it exists
+      if (k.image_path) {
+            const { data: encryptedBlob, error: downloadError } =
+              await supabase.storage
+                .from("keepsake-images")
+                .download(k.image_path);
+
+            if (downloadError) throw downloadError;
+
+            const decryptionKey = deriveKeyFromPin(enteredPin.value, k.encryption_key);
+
+            const decryptedBlob = await decryptAudioBlob(encryptedBlob, decryptionKey);
+            k.imageUrl = URL.createObjectURL(decryptedBlob);
+          }
+
+
+      // Initialize audio playback state
+      playing.value[k.id] = false;
+
+    } catch (err) {
+      console.error("Error processing keepsake:", err);
+      k.audioUrl = null;
+      k.imageUrl = null;
+      pinError.value = err.message || "Failed to load keepsake";
+    }
+  }
+
   await nextTick();
-  
-  // Small delay to ensure Swiper is ready
-  setTimeout(() => {
-    initializeWaveSurfers();
-  }, 100);
+  setTimeout(() => initializeWaveSurfers(), 100);
+  loading.value = false;
 }
+
+
 
 function initializeWaveSurfers() {
   keepsakes.value.forEach((k) => {
@@ -390,6 +456,40 @@ onMounted(loadKeepsake);
 
   </div>
 </div>
+  <!-- Skeleton Loader -->
+   <Swiper
+  v-if="pinEntered && loading"
+  ref="swiperRef"
+  :slides-per-view="1"
+  class="skeleton-swiper"
+>
+  <SwiperSlide v-for="n in 3" :key="n">
+    <div class="skeleton-card">
+      
+      <!-- Album Art Placeholder -->
+      <div class="skeleton-album"></div>
+
+      <!-- Title Placeholder -->
+      <div class="skeleton-title"></div>
+
+      <!-- Waveform Placeholder -->
+      <div class="skeleton-waveform"></div>
+
+      <!-- Time Placeholder -->
+      <div class="skeleton-time">
+        <span class="skeleton-time-left"></span>
+        <span class="skeleton-time-right"></span>
+      </div>
+
+      <!-- Controls Placeholder -->
+      <div class="skeleton-controls">
+        <div class="skeleton-btn"></div>
+        <div class="skeleton-btn"></div>
+        <div class="skeleton-btn"></div>
+      </div>
+    </div>
+  </SwiperSlide>
+</Swiper>
 
     <!-- Main Player (after unlock) -->
     <Swiper
@@ -404,22 +504,21 @@ onMounted(loadKeepsake);
           <div class="album-section">
             <!-- Header -->
             <div class="header mb-2 text-sm sm:text-base text-gray-200">
-              Voice Keepsake
+              <br>
             </div>
+              <img
+                v-if="k.imageUrl"
+                :src="k.imageUrl"
+                class="album-art w-40 h-40 sm:w-48 sm:h-48 md:w-56 md:h-56 lg:w-60 lg:h-60 object-cover rounded-full mb-4"
+                :class="{ spinning: playing[k.id] }"
+                alt="Keepsake Image"
+              />
 
-            <!-- Uploaded Image (replacing QR) -->
-            <img
-              v-if="k.qrDataUrl"
-              :src="k.qrDataUrl"
-              class="album-art w-40 h-40 sm:w-48 sm:h-48 md:w-56 md:h-56 lg:w-60 lg:h-60 object-cover rounded-full mb-4"
-              :class="{ spinning: playing[k.id] }"
-              alt="Keepsake Image"
-            />
 
             <!-- Optional placeholder if no image -->
-            <div v-else class="w-40 h-40 sm:w-48 sm:h-48 md:w-56 md:h-56 lg:w-60 lg:h-60 bg-gray-700 rounded-full flex items-center justify-center mb-4">
-              <span class="text-gray-300">No Image</span>
-            </div>
+            <!-- <div v-else class="w-40 h-40 sm:w-48 sm:h-48 md:w-56 md:h-56 lg:w-60 lg:h-60 bg-gray-700 rounded-full flex items-center justify-center mb-4">
+              <span class="text-gray-300">Loading...</span>
+            </div> -->
           </div>
 
 
@@ -524,6 +623,103 @@ onMounted(loadKeepsake);
 </template>
 
 <style scoped>
+
+/* Skeleton Loader Animation */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.skeleton-card {
+  margin-top: 40%;
+  border-radius: 1.5rem;
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  animation: pulse 1.5s ease-in-out infinite;
+  
+}
+
+.skeleton-card > div::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: 100%;
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: inherit;
+}
+
+/* Album Art */
+.skeleton-album {
+  width: 10rem;
+  height: 10rem;
+  background-color: #374151;
+  border-radius: 50%;
+  margin-bottom: 1rem;
+}
+
+@media (min-width: 640px) { .skeleton-album { width: 12rem; height: 12rem; } }
+@media (min-width: 768px) { .skeleton-album { width: 14rem; height: 14rem; } }
+@media (min-width: 1024px) { .skeleton-album { width: 15rem; height: 15rem; } }
+
+/* Title */
+.skeleton-title {
+  width: 8rem;
+  height: 1.25rem;
+  background-color: #4b5563;
+  border-radius: 0.5rem;
+  margin-bottom: 1rem;
+}
+@media (min-width: 640px) { .skeleton-title { width: 10rem; } }
+@media (min-width: 768px) { .skeleton-title { width: 12rem; } }
+
+/* Waveform */
+.skeleton-waveform {
+  width: 100%;
+  height: 3rem;
+  background-color: #4b5563;
+  border-radius: 999px;
+  margin-bottom: 1rem;
+}
+
+/* Time placeholders */
+.skeleton-time {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0 0.5rem;
+  margin-bottom: 1rem;
+}
+.skeleton-time-left,
+.skeleton-time-right {
+  width: 2rem;
+  height: 0.75rem;
+  background-color: #6b7280;
+  border-radius: 0.25rem;
+}
+
+/* Controls */
+.skeleton-controls {
+  display: flex;
+  justify-content: space-around;
+  width: 100%;
+  padding: 0 1.5rem;
+}
+.skeleton-btn {
+  width: 2.25rem;
+  height: 2.25rem;
+  background-color: #4b5563;
+  border-radius: 50%;
+}
+@media (min-width: 640px) { .skeleton-btn { width: 2.75rem; height: 2.75rem; } }
+@media (min-width: 768px) { .skeleton-btn { width: 3rem; height: 3rem; } }
+
+  
 /* ==================== Base Card Styles ==================== */
 .spotify-card {
  
