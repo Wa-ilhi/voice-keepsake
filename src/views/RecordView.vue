@@ -295,6 +295,9 @@ async function saveKeepsake() {
   } finally {
     isSaving.value = false;
   }
+  setTimeout(() => {
+  status.value = '';
+}, 1000);
 }
 
 async function copyLink() {
@@ -527,6 +530,35 @@ function createAnother() {
 
         <!-- Export/Save Section -->
       <div class="export-section">
+
+
+        <!-- Status + Shareable Link -->
+<div v-if="status || shareableLink" class="status-container mt-4 flex flex-col items-center gap-2 text-center">
+  <!-- Status message -->
+  <p v-if="status" class="status-message text-sm sm:text-base">
+    {{ status }}
+  </p>
+
+  <!-- Clickable link -->
+ <span v-if="shareableLink" class="text-sm flex items-center gap-2">
+  <!-- Indicator -->
+  <span class="w-2 h-2 rounded-full bg-green-400 animate-pulse"></span>
+
+  <!-- Link -->
+  <a
+    :href="shareableLink"
+    target="_blank"
+    class="underline hover:text-green-400 font-medium flex items-center gap-1"
+  >
+    Click to Preview
+    <!-- Optional external icon -->
+    <ion-icon name="open-outline" class="text-[12px]"></ion-icon>
+  </a>
+</span>
+
+</div>
+<br>
+
   <button
     v-if="audioBlob && pin.length >= 4"
     @click="saveKeepsake"
@@ -554,7 +586,8 @@ function createAnother() {
     </span>
   </button>
 
-  <p v-if="status" class="status-message">{{ status }}</p>
+
+
 </div>
 
       </div>
