@@ -39,12 +39,17 @@ async function startRecording() {
   status.value = 'Recording your voice…'
 }
 
-function handleImageUpload(event) {
-  const file = event.target.files[0];
+async function handleImageUpload(e) {
+  const file = e.target.files[0];
   if (!file) return;
 
-  imageFile.value = file;
-  imageName.value = file.name; // just the filename
+  // IMMEDIATELY read into memory
+  const buffer = await file.arrayBuffer();
+
+  imageFile.value = {
+    buffer,
+    type: file.type
+  };
 }
 
 // Remove the selected file
@@ -129,6 +134,24 @@ function deleteRecording() {
     duration.value = 0;
   }
 }
+
+async function normalizeToArrayBuffer(data) {
+  if (data instanceof ArrayBuffer) {
+    return data;
+  }
+
+  if (data instanceof Blob) {
+    return await data.arrayBuffer();
+  }
+
+  if (data.buffer instanceof ArrayBuffer) {
+    return data.buffer; // Uint8Array
+  }
+
+  throw new Error("Unsupported audio format");
+}
+
+
 async function saveKeepsake() {
   if ((!audioBlob.value && !imageFile.value) || !pin.value || pin.value.length < 4) {
     status.value = 'Please add a PIN and record audio or upload an image';
@@ -159,31 +182,39 @@ async function saveKeepsake() {
     // -----------------------------
     // Upload encrypted audio
     // -----------------------------
-    if (audioBlob.value) {
-      status.value = '🔐 Encrypting audio...';
+  if (audioBlob.value) {
+  status.value = '🔐 Encrypting audio...';
 
-      const encryptedAudioArrayBuffer = await encryptAudioBlob(audioBlob.value, encryptionKey);
-      const encryptedAudioBlob = new Blob([encryptedAudioArrayBuffer], {
-        type: 'application/octet-stream'
-      });
+  const audioArrayBuffer = await normalizeToArrayBuffer(audioBlob.value);
 
-      audioPath = `${id}_encrypted.enc`;
+  const encryptedAudioArrayBuffer = await encryptAudioBlob(
+    audioArrayBuffer,
+    encryptionKey
+  );
 
-      status.value = '📤 Uploading encrypted audio...';
+  const encryptedAudioBlob = new Blob(
+    [encryptedAudioArrayBuffer],
+    { type: 'application/octet-stream' }
+  );
 
-      const { error: uploadError } = await supabase.storage
-        .from('keepsake-audio')
-        .upload(audioPath, encryptedAudioBlob, {
-          contentType: 'application/octet-stream',
-          cacheControl: '3600'
-        });
+  audioPath = `${id}_encrypted.enc`;
 
-      if (uploadError) {
-        status.value = 'Failed to upload audio';
-        console.error('Audio upload error:', uploadError);
-        return;
-      }
-    }
+  status.value = '📤 Uploading encrypted audio...';
+
+  const { error: uploadError } = await supabase.storage
+    .from('keepsake-audio')
+    .upload(audioPath, encryptedAudioBlob, {
+      contentType: 'application/octet-stream',
+      cacheControl: '3600'
+    });
+
+  if (uploadError) {
+    console.error('Audio upload error:', uploadError);
+    status.value = 'Failed to upload audio';
+    return;
+  }
+}
+
 
     // -----------------------------
     // Upload encrypted image
@@ -191,14 +222,15 @@ async function saveKeepsake() {
     if (imageFile.value) {
       status.value = '🔐 Encrypting image...';
 
-      const imageBlob = imageFile.value instanceof Blob 
-        ? imageFile.value 
-        : new Blob([imageFile.value], { type: imageFile.value.type });
+      const encryptedImageArrayBuffer = await encryptAudioBlob(
+        imageFile.value.buffer,
+        encryptionKey
+      );
 
-      const encryptedImageArrayBuffer = await encryptAudioBlob(imageBlob, encryptionKey);
-      const encryptedImageBlob = new Blob([encryptedImageArrayBuffer], { 
-        type: 'application/octet-stream' 
-      });
+      const encryptedImageBlob = new Blob(
+        [encryptedImageArrayBuffer],
+        { type: 'application/octet-stream' }
+      );
 
       imagePath = `${id}_img_encrypted.enc`;
 
@@ -212,13 +244,12 @@ async function saveKeepsake() {
         });
 
       if (imgError) {
-        status.value = 'Failed to upload image';
         console.error('Image upload error:', imgError);
+        status.value = 'Failed to upload image';
         return;
       }
-
-      
     }
+
 
     // -----------------------------
     // Save metadata in DB
