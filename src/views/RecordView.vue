@@ -348,15 +348,6 @@ function createAnother() {
 <template>
   <div :class="['app-container', { 'light-mode': !isDarkMode }]">
     <div class="w-full max-w-2xl">
-      
-      <!-- Studio Header -->
-      <div class="studio-header">
-        <div class="flex items-center justify-center gap-3 mb-2">
-          <h5 class="header-title">
-            VOICE KEEPSAKE STUDIO
-          </h5>
-        </div>
-        
         <!-- Theme Toggle Button -->
        <button 
           @click="toggleTheme" 
@@ -373,6 +364,16 @@ function createAnother() {
             <ion-icon name="sunny-outline" class="track-icon sun"></ion-icon>
           </div>
         </button>
+
+      <!-- Studio Header -->
+      <div class="studio-header">
+        <div class="flex items-center justify-center gap-3 mb-2">
+          <h5 class="header-title">
+            VOICE KEEPSAKE STUDIO
+          </h5>
+        </div>
+        
+      
       </div>
 
       <!-- Main Studio Panel -->
@@ -568,7 +569,7 @@ function createAnother() {
             <!-- Clickable link -->
             <span v-if="shareableLink" class="text-sm flex items-center gap-2">
               <!-- Indicator -->
-              <span class="link-indicator"></span>
+              
 
               <!-- Link -->
               <a
@@ -693,16 +694,27 @@ function createAnother() {
 
 /* ==================== Theme Toggle Capsule Button ==================== */
 .theme-toggle-capsule {
-  position: absolute;
-  top: 1rem;
-  right: 1rem;
-  background: transparent;
+  position: sticky;       /* sticky behavior */
+  top: 4rem;              /* distance from the top */
+  right: 1rem;            /* distance from the right edge */
+  margin: 0;              /* margin is not needed for sticky positioning */
+  z-index: 100;           /* on top of other content */
+  
+  background: rgba(0,0,0,0.5); /* optional floating look */
   border: none;
+  border-radius: 9999px;  /* capsule shape */
+  padding: 0.5rem 0.75rem;
   cursor: pointer;
-  z-index: 100;
-  padding: 0;
-  transition: transform 0.2s ease;
+  transition: transform 0.2s ease, background 0.2s ease;
 }
+
+/* Hover effect */
+.theme-toggle-capsule:hover {
+  background: rgba(0,0,0,0.8);
+  transform: scale(1.1);
+}
+
+
 
 .theme-toggle-capsule:hover {
   transform: scale(1.05);
@@ -1013,12 +1025,11 @@ function createAnother() {
 }
 
 .transport-btn {
-  width: clamp(40px, 10vw, 56px);
-  height: clamp(40px, 10vw, 56px);
-  border-radius: 50%;
-  border: clamp(1.5px, 0.4vw, 2px) solid var(--border-input);
-  background: var(--bg-input);
-  color: var(--text-primary);
+  width: clamp(40px, 10vw, 56px) !important;
+  height: clamp(40px, 10vw, 56px) !important;
+  border-radius: 50% !important;
+  padding: 0 !important; /* remove global padding */
+  font-size: 0 !important; /* remove global font-size */
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1049,8 +1060,11 @@ function createAnother() {
 }
 
 .transport-btn.delete {
-  border-color: var(--border-section);
+  background: linear-gradient(135deg, var(--accent-color), var(--accent-hover));
+  border-color: var(--accent-hover);
+  color: white;
 }
+
 
 .transport-btn.delete:hover {
   background: rgba(239, 68, 68, 0.2);
@@ -1262,12 +1276,14 @@ function createAnother() {
 /* ==================== Export Section ==================== */
 .export-section {
   text-align: center;
+  justify-content: center;
   padding-top: 2rem;
 }
 
 .export-btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 0.75rem;
   padding: 1rem 2rem;
   background: linear-gradient(135deg, var(--accent-color), var(--accent-hover));
@@ -1312,14 +1328,44 @@ function createAnother() {
 }
 
 .preview-link {
-  text-decoration: underline;
   color: var(--text-primary);
   font-weight: 500;
   display: flex;
   align-items: center;
-  gap: 0.25rem;
+  gap: 0.5rem;
+  cursor: pointer;
+  text-decoration: none;
   transition: color 0.3s;
 }
+
+/* The indicator dot */
+.preview-link::before {
+  content: '';
+  display: inline-block;
+  width: 0.6rem;
+  height: 0.6rem;
+  background-color: #10b981; /* Green for “live/active” */
+  border-radius: 50%;
+  animation: pulse-dot 1.5s ease-in-out infinite;
+}
+
+/* Pulse animation for the dot */
+@keyframes pulse-dot {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.8;
+  }
+  50% {
+    transform: scale(1.4);
+    opacity: 0.3;
+  }
+}
+
+/* Optional hover effect */
+.preview-link:hover {
+  color: var(--accent-color);
+}
+
 
 .preview-link:hover {
   color: var(--success-color);
@@ -1370,6 +1416,8 @@ function createAnother() {
 
 .credits-subtext {
   color: var(--text-muted);
+  margin: 0;
+  text-align: right;
 }
 
 /* ==================== Responsive Layout ==================== */
