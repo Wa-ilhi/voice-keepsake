@@ -20,6 +20,7 @@ const playing = ref({});
 const activeMessageId = ref(null);
 const swiperRef = ref(null);
 const repeatMode = ref(0);
+const MessageMode = ref(0);
 const audioLoaded = ref(false);
 const enteredPin = ref("");
 const pinError = ref("");
@@ -29,6 +30,32 @@ const flap = ref(null);
 const sheet = ref(null);
 const loading = ref(true);
 const pinEntered = ref(false);
+const theme = ref("dark"); // FORCE dark as default
+
+function applyTheme(value) {
+  document.documentElement.setAttribute("data-theme", value);
+}
+
+function toggleTheme() {
+  theme.value = theme.value === "dark" ? "light" : "dark";
+  localStorage.setItem("theme", theme.value);
+  applyTheme(theme.value);
+}
+
+onMounted(() => {
+  // Force dark mode if no saved preference
+  const savedTheme = localStorage.getItem("theme");
+
+  if (!savedTheme) {
+    theme.value = "dark";               // ⬅ force dark
+    localStorage.setItem("theme", "dark");
+  } else {
+    theme.value = savedTheme;
+  }
+
+  applyTheme(theme.value);
+});
+
 
 function formatTime(seconds) {
   const m = Math.floor(seconds / 60);
@@ -249,6 +276,34 @@ const repeatModeStyle = computed(() => {
   return repeatMode.value === 0 ? { color: '#f9f9f9' } : { color: '#1DB954' };
 });
 
+const repeatModeMessageStyle = computed(() => {
+  return MessageMode.value === 0 ? { color: '#f9f9f9' } : { color: '#1DB954' };
+});
+
+const titleColorStyle = computed(() => {
+  return MessageMode.value === 0
+    ? { color: '#f9f9f9' } // default color
+    : { color: '#1DB954' }; // alternate color
+});
+
+const keypadButtonStyle = computed(() => {
+  return theme.value === 'dark'
+    ? {
+        backgroundColor: '#1F2937', // dark button bg
+        color: '#f9f9f9',           // light text
+      }
+    : {
+        backgroundColor: '#F3F4F6', // light button bg
+        color: '#1F2937',           // dark text
+      };
+});
+
+// Hover effect (inline JS way, can also use Tailwind)
+const keypadHoverStyle = {
+  filter: 'brightness(1.2)', // brighten on hover
+  cursor: 'pointer',
+};
+
 function onAudioFinish(id) {
   if (repeatMode.value === 1) {
     wavesurfers.value[id]?.play();
@@ -401,6 +456,9 @@ onMounted(loadKeepsake);
       v-for="num in [1, 2, 3]"
       :key="num"
       @click="addDigit(num)"
+      :style="keypadButtonStyle"
+      @mouseover="e => e.currentTarget.style.filter='brightness(1.2)'"
+      @mouseleave="e => e.currentTarget.style.filter='brightness(1)'"
       class="ios-keypad-button"
     >
       {{ num }}
@@ -413,6 +471,9 @@ onMounted(loadKeepsake);
       v-for="num in [4, 5, 6]"
       :key="num"
       @click="addDigit(num)"
+      :style="keypadButtonStyle"
+      @mouseover="e => e.currentTarget.style.filter='brightness(1.2)'"
+      @mouseleave="e => e.currentTarget.style.filter='brightness(1)'"
       class="ios-keypad-button"
     >
       {{ num }}
@@ -425,6 +486,9 @@ onMounted(loadKeepsake);
       v-for="num in [7, 8, 9]"
       :key="num"
       @click="addDigit(num)"
+      :style="keypadButtonStyle"
+      @mouseover="e => e.currentTarget.style.filter='brightness(1.2)'"
+      @mouseleave="e => e.currentTarget.style.filter='brightness(1)'"
       class="ios-keypad-button"
     >
       {{ num }}
@@ -432,23 +496,38 @@ onMounted(loadKeepsake);
   </div>
 
   <!-- Row 4: Clear 0 Backspace -->
-        <div class="ios-keypad-row">
-        <!-- Clear Button -->
-        <button @click="clearPin" class="ios-keypad-clear">
-          <ion-icon name="close-circle-outline" class="text-2xl"></ion-icon>
-        </button>
-        
-        <!-- Zero Button -->
-        <button @click="addDigit(0)" class="ios-keypad-button">
-          0
-        </button>
-        
-        <!-- Backspace Button -->
-        <button @click="deleteDigit" class="ios-keypad-backspace">
-          <ion-icon name="backspace-outline" class="text-2xl"></ion-icon>
-        </button>
-      </div>
-      </div>
+  <div class="ios-keypad-row">
+    <button 
+      @click="clearPin" 
+      :style="keypadButtonStyle"
+      @mouseover="e => e.currentTarget.style.filter='brightness(1.2)'"
+      @mouseleave="e => e.currentTarget.style.filter='brightness(1)'"
+      class="ios-keypad-clear"
+    >
+      <ion-icon name="close-circle-outline" class="text-2xl"></ion-icon>
+    </button>
+
+    <button 
+      @click="addDigit(0)" 
+      :style="keypadButtonStyle"
+      @mouseover="e => e.currentTarget.style.filter='brightness(1.2)'"
+      @mouseleave="e => e.currentTarget.style.filter='brightness(1)'"
+      class="ios-keypad-button"
+    >
+      0
+    </button>
+
+    <button 
+      @click="deleteDigit" 
+      :style="keypadButtonStyle"
+      @mouseover="e => e.currentTarget.style.filter='brightness(1.2)'"
+      @mouseleave="e => e.currentTarget.style.filter='brightness(1)'"
+      class="ios-keypad-backspace"
+    >
+      <ion-icon name="backspace-outline" class="text-2xl"></ion-icon>
+    </button>
+  </div>
+</div>
 
     
     
@@ -526,10 +605,14 @@ onMounted(loadKeepsake);
           <div class="controls-section">
             <!-- Song Info -->
             <div class="text-center lg:text-left mb-4">
-              <h2 class="text-lg sm:text-xl md:text-2xl font-semibold text-white">
+              <h2 
+                class="text-lg sm:text-xl md:text-2xl font-semibold"
+                :style="titleColorStyle"
+              >
                 {{ k.title }}
               </h2>
             </div>
+
 
             <!-- Waveform -->
             <div
@@ -552,7 +635,8 @@ onMounted(loadKeepsake);
               <!-- Info / Message -->
               <button
                 @click="openMessage(k)"
-                class="icon w-9 h-9 sm:w-11 sm:h-11 text-white hover:text-gray-300"
+                class="icon w-9 h-9 sm:w-11 sm:h-11 relative"
+                :style="repeatModeMessageStyle"
               >
                 <ion-icon
                   name="mail-unread-outline"
@@ -623,7 +707,28 @@ onMounted(loadKeepsake);
 </template>
 
 <style scoped>
+:root {
+  --bg-main: #000000;
+  --card-bg: #000000;
+  --text-main: #ffffff;
+  --text-muted: #9ca3af;
+}
 
+/* Light mode ONLY if user toggles */
+[data-theme="light"] {
+  --bg-main: #f9fafb;
+  --card-bg: #ffffff;
+  --text-main: #111827;
+  --text-muted: #6b7280;
+}
+
+/* App background */
+.app-root {
+  background: var(--bg-main);
+  color: var(--text-main);
+  min-height: 100vh;
+  transition: background 0.3s ease, color 0.3s ease;
+}
 /* Skeleton Loader Animation */
 @keyframes pulse {
   0%, 100% { opacity: 1; }
@@ -839,7 +944,7 @@ onMounted(loadKeepsake);
   display: flex;
   justify-content: space-between;
   font-size: 0.7rem;
-  color: #6b7280;
+  color: #ffffff;
   margin-top: 0.25rem;
   width: 100%;
 }
@@ -1145,9 +1250,9 @@ onMounted(loadKeepsake);
   background: rgba(159, 163, 164, 0.1);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  border: 1px solid rgba(237, 91, 176, 0.2);
+  border: 1px solid rgba(219, 5, 5, 0.2);
   border-radius: 50%;
-  color: rgba(207, 250, 254, 0.9);
+  color: rgb(127, 6, 6);
   font-weight: 300;
   font-size: 1.875rem;
   display: flex;

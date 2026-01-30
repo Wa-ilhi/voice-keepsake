@@ -1,9 +1,25 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { supabase } from '../lib/supabase'
 import bcrypt from 'bcryptjs'
 import { encryptAudioBlob, deriveKeyFromPin, generateSalt } from '../lib/encryption';
 
+// Theme state
+const isDarkMode = ref(true)
+
+// Load theme preference from localStorage
+onMounted(() => {
+  const savedTheme = localStorage.getItem('theme')
+  if (savedTheme) {
+    isDarkMode.value = savedTheme === 'dark'
+  }
+})
+
+// Toggle theme and save preference
+function toggleTheme() {
+  isDarkMode.value = !isDarkMode.value
+  localStorage.setItem('theme', isDarkMode.value ? 'dark' : 'light')
+}
 
 const recording = ref(false)
 const recorder = ref(null)
@@ -330,17 +346,33 @@ function createAnother() {
 
 
 <template>
-  <div class="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-black flex items-center justify-center p-4">
+  <div :class="['app-container', { 'light-mode': !isDarkMode }]">
     <div class="w-full max-w-2xl">
       
       <!-- Studio Header -->
       <div class="studio-header">
         <div class="flex items-center justify-center gap-3 mb-2">
-          <h5 class="text-3xl font-bold text-white tracking-wide">
+          <h5 class="header-title">
             VOICE KEEPSAKE STUDIO
           </h5>
         </div>
-      
+        
+        <!-- Theme Toggle Button -->
+       <button 
+          @click="toggleTheme" 
+          class="theme-toggle-capsule" 
+          :class="{ 'light': !isDarkMode }"
+          :title="isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'"
+        >
+          <div class="toggle-track">
+            <div class="toggle-slider">
+              <ion-icon v-if="isDarkMode" name="moon" class="slider-icon"></ion-icon>
+              <ion-icon v-else name="sunny" class="slider-icon"></ion-icon>
+            </div>
+            <ion-icon name="moon-outline" class="track-icon moon"></ion-icon>
+            <ion-icon name="sunny-outline" class="track-icon sun"></ion-icon>
+          </div>
+        </button>
       </div>
 
       <!-- Main Studio Panel -->
@@ -352,11 +384,6 @@ function createAnother() {
             <ion-icon name="mic-outline" class="text-xl"></ion-icon>
             <span>Recording Booth</span>
           </div>
-
-         
-
-          <!-- Microphone Control -->
-         
 
           <!-- Audio Player -->
           <div v-if="audioUrl" class="mt-6">
@@ -413,7 +440,7 @@ function createAnother() {
             </div>
           </div>
 
-           <div class="flex justify-center mt-6">
+          <div class="flex justify-center mt-6">
             <button
               v-if="!recording"
               @click="startRecording"
@@ -470,125 +497,120 @@ function createAnother() {
               />
             </div>
 
-                      <div class="input-group relative">
-              <label class="input-label flex items-center gap-2">
-                <ion-icon name="lock-closed" class="inline text-red-500"></ion-icon>
-                SECURITY PIN
+           <div class="input-group relative">
+            <label class="input-label flex items-center gap-2 w-full">
+              <ion-icon name="lock-closed" class="inline text-red-500"></ion-icon>
+              SECURITY PIN
 
-                <!-- Info icon -->
-                <span class="info-tooltip">
-                  <ion-icon name="information-circle-outline" class="text-gray-400"></ion-icon>
+              
+              <span class="info-tooltip ml-auto">
+                <ion-icon
+                  name="information-circle-outline"
+                  class="info-icon"
+                ></ion-icon>
 
-                  <span class="tooltip-content">
-                    This 4-digit PIN is required to play the voice keepsake.
-                    Only people with the PIN can access playback.
-                  </span>
+                <span class="tooltip-content">
+                  This 4-digit PIN is required to play the voice keepsake.
+                  Only people with the PIN can access playback.
                 </span>
-              </label>
+              </span>
+            </label>
 
-              <input
-                v-model="pin"
-                type="password"
-                inputmode="numeric"
-                maxlength="4"
-                placeholder="4 digits only"
-                class="studio-input text-center tracking-widest text-xl"
-              />
+            <input
+              v-model="pin"
+              type="password"
+              inputmode="numeric"
+              maxlength="4"
+              placeholder="4 digits only"
+              class="studio-input text-center tracking-widest text-xl w-full"
+            />
 
-              <p class="note-text">
-                PIN required for playback access
-              </p>
-            </div>
+            <p class="note-text">
+              PIN required for playback access
+            </p>
+          </div>
 
           </div>
-              <div class="input-group mt-4">
-  <label class="input-label">Attach an Image (optional)</label>
-  <input
-    type="file"
-    accept="image/*"
-    @change="handleImageUpload"
-    class="studio-input"
-  />
+          <div class="input-group mt-4">
+            <label class="input-label">Attach an Image</label>
+            <input
+              type="file"
+              accept="image/*"
+              @change="handleImageUpload"
+              class="studio-input"
+            />
 
-  <!-- Show only the filename like Gmail -->
-  <div v-if="imageName" class="image-filename mt-2 flex items-center gap-2">
-    <span class="text-gray-200 bg-gray-800 px-2 py-1 rounded">
-      {{ imageName }}
-    </span>
-    <button
-      @click="removeImage"
-      class="text-sm text-red-500 hover:underline"
-    >
-      Remove
-    </button>
-  </div>
-</div>
+            <!-- Show only the filename like Gmail -->
+            <div v-if="imageName" class="image-filename mt-2 flex items-center gap-2">
+              <span class="filename-badge">
+                {{ imageName }}
+              </span>
+              <button
+                @click="removeImage"
+                class="remove-btn"
+              >
+                Remove
+              </button>
+            </div>
+          </div>
 
         </div>
 
-   
-
         <!-- Export/Save Section -->
-      <div class="export-section">
+        <div class="export-section">
+          <!-- Status + Shareable Link -->
+          <div v-if="status || shareableLink" class="status-container mt-4 flex flex-col items-center gap-2 text-center">
+            <!-- Status message -->
+            <p v-if="status" class="status-message text-sm sm:text-base">
+              {{ status }}
+            </p>
 
+            <!-- Clickable link -->
+            <span v-if="shareableLink" class="text-sm flex items-center gap-2">
+              <!-- Indicator -->
+              <span class="link-indicator"></span>
 
-        <!-- Status + Shareable Link -->
-<div v-if="status || shareableLink" class="status-container mt-4 flex flex-col items-center gap-2 text-center">
-  <!-- Status message -->
-  <p v-if="status" class="status-message text-sm sm:text-base">
-    {{ status }}
-  </p>
+              <!-- Link -->
+              <a
+                :href="shareableLink"
+                target="_blank"
+                class="preview-link"
+              >
+                Click to Preview
+                <!-- Optional external icon -->
+                <ion-icon name="open-outline" class="text-[12px]"></ion-icon>
+              </a>
+            </span>
+          </div>
+          <br>
 
-  <!-- Clickable link -->
- <span v-if="shareableLink" class="text-sm flex items-center gap-2">
-  <!-- Indicator -->
-  <span class="w-2 h-2 rounded-full bg-green-400 animate-pulse"></span>
+          <button
+            v-if="audioBlob && pin.length >= 4"
+            @click="saveKeepsake"
+            class="export-btn"
+            :disabled="isSaving || isSaved"
+          >
+            <ion-icon
+              v-if="!isSaving && !isSaved"
+              name="save-outline"
+              class="text-2xl"
+            ></ion-icon>
+            <ion-icon
+              v-else-if="isSaving"
+              name="refresh-outline"
+              class="text-2xl animate-spin"
+            ></ion-icon>
+            <ion-icon
+              v-else
+              name="checkmark-outline"
+              class="text-2xl"
+            ></ion-icon>
 
-  <!-- Link -->
-  <a
-    :href="shareableLink"
-    target="_blank"
-    class="underline hover:text-green-400 font-medium flex items-center gap-1"
-  >
-    Click to Preview
-    <!-- Optional external icon -->
-    <ion-icon name="open-outline" class="text-[12px]"></ion-icon>
-  </a>
-</span>
-
-</div>
-<br>
-
-  <button
-    v-if="audioBlob && pin.length >= 4"
-    @click="saveKeepsake"
-    class="export-btn"
-    :disabled="isSaving || isSaved"
-  >
-    <ion-icon
-      v-if="!isSaving && !isSaved"
-      name="save-outline"
-      class="text-2xl"
-    ></ion-icon>
-    <ion-icon
-      v-else-if="isSaving"
-      name="refresh-outline"
-      class="text-2xl animate-spin"
-    ></ion-icon>
-    <ion-icon
-      v-else
-      name="checkmark-outline"
-      class="text-2xl"
-    ></ion-icon>
-
-    <span>
-      {{ isSaving ? 'SAVING...' : isSaved ? 'SAVED' : 'SAVE RECORDING' }}
-    </span>
-  </button>
-
-
-
-</div>
+            <span>
+              {{ isSaving ? 'SAVING...' : isSaved ? 'SAVED' : 'SAVE RECORDING' }}
+            </span>
+          </button>
+        </div>
 
       </div>
 
@@ -599,7 +621,7 @@ function createAnother() {
           <span>SESSION ACTIVE</span>
         </div>
         <div class="text-xs">
-            <p class="credits-subtext">2026 | Voice Keepsake</p>
+          <p class="credits-subtext">2026 | Voice Keepsake</p>
         </div>
       </div>
 
@@ -608,22 +630,220 @@ function createAnother() {
 </template>
 
 <style scoped>
+/* ==================== Theme Variables ==================== */
+.app-container {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  transition: background 0.3s ease;
+  border-radius: .75rem;
+  
+  /* Dark Mode (Default) */
+  background:#0a0a0a;
+  --bg-header: rgba(0, 0, 0, 0.5);
+  --bg-panel: linear-gradient(135deg, rgba(30, 30, 30, 0.95), rgba(20, 20, 20, 0.95));
+  --bg-input: rgba(0, 0, 0, 0.5);
+  --bg-input-focus: rgba(0, 0, 0, 0.7);
+  --bg-player: rgba(0, 0, 0, 0.5);
+  --bg-waveform: #0a0a0a;
+  --bg-footer: rgba(0, 0, 0, 0.3);
+  
+  --text-primary: #ffffff;
+  --text-secondary: #9ca3af;
+  --text-muted: #6b7280;
+  --text-input-placeholder: #6b7280;
+  
+  --border-primary: rgba(255, 255, 255, 0.596);
+  --border-secondary: rgba(255, 255, 255, 0.1);
+  --border-input: rgba(255, 255, 255, 0.1);
+  --border-section: rgba(239, 68, 68, 0.3);
+  
+  --accent-color: #ef4444;
+  --accent-hover: #dc2626;
+  --success-color: #10b981;
+}
 
+/* Light Mode */
+.app-container.light-mode {
+  background: linear-gradient(135deg, #e0f2fe 0%, #bae6fd 50%, #7dd3fc 100%);
+  --bg-header: rgba(255, 255, 255, 0.8);
+  --bg-panel: linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(248, 250, 252, 0.95));
+  --bg-input: rgba(255, 255, 255, 0.8);
+  --bg-input-focus: rgba(255, 255, 255, 1);
+  --bg-player: rgba(248, 250, 252, 0.9);
+  --bg-waveform: #f1f5f9;
+  --bg-footer: rgba(255, 255, 255, 0.5);
+  
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #64748b;
+  --text-input-placeholder: #94a3b8;
+  
+  --border-primary: rgba(15, 23, 42, 0.2);
+  --border-secondary: rgba(15, 23, 42, 0.1);
+  --border-input: rgba(15, 23, 42, 0.15);
+  --border-section: rgba(239, 68, 68, 0.4);
+  
+  --accent-color: #dc2626;
+  --accent-hover: #b91c1c;
+  --success-color: #059669;
+}
+
+/* ==================== Theme Toggle Capsule Button ==================== */
+.theme-toggle-capsule {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  z-index: 100;
+  padding: 0;
+  transition: transform 0.2s ease;
+}
+
+.theme-toggle-capsule:hover {
+  transform: scale(1.05);
+}
+
+.theme-toggle-capsule:active {
+  transform: scale(0.98);
+}
+
+.toggle-track {
+  position: relative;
+  width: 80px;
+  height: 40px;
+  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+  border-radius: 20px;
+  border: 2px solid rgba(255, 255, 255, 0.15);
+  transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 
+    inset 0 2px 6px rgba(0, 0, 0, 0.4),
+    0 4px 12px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+}
+
+.theme-toggle-capsule.light .toggle-track {
+  background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+  border-color: rgba(251, 191, 36, 0.4);
+  box-shadow: 
+    inset 0 2px 6px rgba(0, 0, 0, 0.1),
+    0 4px 16px rgba(251, 191, 36, 0.5),
+    0 0 20px rgba(251, 191, 36, 0.3);
+}
+
+.toggle-slider {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 32px;
+  height: 32px;
+  background: white;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 
+    0 2px 8px rgba(0, 0, 0, 0.3),
+    0 0 0 1px rgba(255, 255, 255, 0.1);
+  z-index: 2;
+}
+
+.theme-toggle-capsule.light .toggle-slider {
+  transform: translateX(42px);
+  background: #ffffff;
+  box-shadow: 
+    0 2px 8px rgba(0, 0, 0, 0.2),
+    0 0 0 1px rgba(251, 191, 36, 0.2);
+}
+
+.slider-icon {
+  font-size: 20px !important;
+  display: block !important;
+  transition: all 0.3s ease;
+}
+
+.theme-toggle-capsule .slider-icon {
+  color: #1e293b;
+}
+
+.theme-toggle-capsule.light .slider-icon {
+  color: #f59e0b;
+}
+
+.track-icon {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 18px !important;
+  display: block !important;
+  transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 1;
+}
+
+.track-icon.moon {
+  left: 10px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.track-icon.sun {
+  right: 10px;
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.theme-toggle-capsule.light .track-icon.moon {
+  color: rgba(0, 0, 0, 0.2);
+}
+
+.theme-toggle-capsule.light .track-icon.sun {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+/* Glow effect on hover */
+.theme-toggle-capsule:hover .toggle-track {
+  box-shadow: 
+    inset 0 2px 6px rgba(0, 0, 0, 0.4),
+    0 4px 16px rgba(0, 0, 0, 0.4),
+    0 0 24px rgba(239, 68, 68, 0.3);
+}
+
+.theme-toggle-capsule.light:hover .toggle-track {
+  box-shadow: 
+    inset 0 2px 6px rgba(0, 0, 0, 0.1),
+    0 4px 20px rgba(251, 191, 36, 0.6),
+    0 0 32px rgba(251, 191, 36, 0.4);
+}
+
+/* ==================== Header ==================== */
 .studio-header {
+  position: relative;
   text-align: center;
   margin-bottom: .5rem;
   padding: .5rem;
-  background: rgba(0, 0, 0, 0.5);
+  background: var(--bg-header);
   border-radius: 1rem;
-  border: 1px solid rgba(255, 255, 255, 0.596);
+  border: 1px solid var(--border-primary);
+  backdrop-filter: blur(10px);
 }
 
+.header-title {
+  font-size: 1.875rem;
+  font-weight: bold;
+  color: var(--text-primary);
+  letter-spacing: 0.05em;
+}
+
+/* ==================== Main Panel ==================== */
 .studio-panel {
-  background: linear-gradient(135deg, rgba(30, 30, 30, 0.95), rgba(20, 20, 20, 0.95));
+  background: var(--bg-panel);
   border-radius: 1.5rem;
   padding: 2rem;
-  border: 2px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  border: 2px solid var(--border-secondary);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
   backdrop-filter: blur(10px);
 }
 
@@ -631,51 +851,19 @@ function createAnother() {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  color: #ef4444;
+  color: var(--accent-color);
   font-weight: 600;
   font-size: 0.875rem;
   text-transform: uppercase;
   letter-spacing: 0.1em;
   margin-bottom: 1.5rem;
   padding-bottom: 0.75rem;
-  border-bottom: 1px solid rgba(239, 68, 68, 0.3);
+  border-bottom: 1px solid var(--border-section);
 }
 
 /* ==================== Recording Section ==================== */
 .recording-section {
   margin-bottom: 2rem;
-}
-
-
-
-.vu-meter {
-  display: flex;
-  gap: 3px;
-  height: 80px;
-  align-items: flex-end;
-  justify-content: center;
-  margin-bottom: 1rem;
-}
-
-.vu-bar {
-  flex: 1;
-  background: #1f2937;
-  border-radius: 2px;
-  transition: all 0.1s;
-  max-width: 8px;
-}
-
-.vu-bar.active {
-  background: #10b981;
-}
-
-.vu-bar.active.warm {
-  background: #f59e0b;
-}
-
-.vu-bar.active.hot {
-  background: #ef4444;
-  box-shadow: 0 0 10px #ef4444;
 }
 
 .recording-status {
@@ -686,11 +874,11 @@ function createAnother() {
 }
 
 .status-text {
-  color: #6b7280;
+  color: var(--text-muted);
 }
 
 .status-text.recording-live {
-  color: #ef4444;
+  color: var(--accent-color);
   animation: blink 1s infinite;
 }
 
@@ -698,64 +886,6 @@ function createAnother() {
   0%, 50% { opacity: 1; }
   51%, 100% { opacity: 0.3; }
 }
-
-/* Desktop / landscape layout */
-@media (min-width: 1024px) {
-  .studio-panel {
-    display: flex;
-    flex-direction: row;  /* side-by-side */
-    gap: 5rem;
-    padding: 2.5rem;
-    flex-wrap: wrap; 
-  }
-
-  /* Make recording section narrower */
-  .recording-section {
-    flex: 1;   /* occupies less width */
-    min-width: 250px;
-    margin-top: 2rem;
-  }
-
-  /* Make track info / waveform wider */
-  .track-info-section {
-    flex: 2;   /* right panel */
-    min-width: 400px;
-    
-  }
-
-  /* Align export section at the bottom */
-   .export-section {
-    flex-basis: 100%;      /* span full width */
-    margin-top: 1.5rem;    /* spacing from panels above */
-  }
-
-
-  /* Center mic button vertically in its section */
-  .studio-mic-button {
-    margin: auto;
-  }
-}
-
-
-@media (min-width: 1024px) {
-  .vu-meter {
-    height: 100px; /* bigger meters on desktop */
-  }
-
-  .mic-circle {
-    width: 140px;
-    height: 140px;
-  }
-
-  .waveform-grid {
-    height: 70px;
-  }
-
-  .studio-input {
-    font-size: 1rem;
-  }
-}
-
 
 /* ==================== Microphone Button ==================== */
 .studio-mic-button {
@@ -767,8 +897,8 @@ function createAnother() {
   border: none;
   cursor: pointer;
   position: relative;
-  margin: 0 auto;      /* ⬅️ force center */
-  flex-shrink: 0;      /* ⬅️ prevent shrinking */
+  margin: 0 auto;
+  flex-shrink: 0;
 }
 
 .mic-circle {
@@ -780,16 +910,21 @@ function createAnother() {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #ef4444;
+  color: var(--accent-color);
   transition: all 0.3s;
   box-shadow: 
     0 0 20px rgba(239, 68, 68, 0.2),
     inset 0 0 20px rgba(239, 68, 68, 0.1);
 }
 
+.light-mode .mic-circle {
+  background: radial-gradient(circle, rgba(220, 38, 38, 0.15), rgba(185, 28, 28, 0.05));
+  border: 3px solid rgba(220, 38, 38, 0.4);
+}
+
 .mic-circle:hover {
   transform: scale(1.05);
-  border-color: #ef4444;
+  border-color: var(--accent-color);
   box-shadow: 
     0 0 40px rgba(239, 68, 68, 0.4),
     inset 0 0 30px rgba(239, 68, 68, 0.2);
@@ -797,7 +932,7 @@ function createAnother() {
 
 .mic-circle.recording-active {
   animation: recordPulse 1.5s ease-in-out infinite;
-  border-color: #dc2626;
+  border-color: var(--accent-hover);
 }
 
 @keyframes recordPulse {
@@ -815,53 +950,32 @@ function createAnother() {
   }
 }
 
-
-
-.studio-mic-button.recording::before {
-  animation: ripple 2s ease-out infinite;
-}
-
-.studio-mic-button.recording::after {
-  animation: ripple 2s ease-out infinite 1s;
-}
-
-@keyframes ripple {
-  0% {
-    transform: scale(1);
-    opacity: 1;
-  }
-  100% {
-    transform: scale(2);
-    opacity: 0;
-  }
-}
-
 .mic-status {
   font-family: 'Courier New', monospace;
   font-size: 0.75rem;
   font-weight: 600;
-  color: #9ca3af;
+  color: var(--text-secondary);
   letter-spacing: 0.15em;
 }
 
 .studio-mic-button.recording .mic-status {
-  color: #ef4444;
+  color: var(--accent-color);
 }
 
 /* ==================== Studio Player ==================== */
 .studio-player {
-  background: rgba(0, 0, 0, 0.5);
+  background: var(--bg-player);
   border-radius: 1rem;
   padding: 1.5rem;
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-secondary);
 }
 
 .waveform-display {
-  background: #0a0a0a;
+  background: var(--bg-waveform);
   border-radius: 0.5rem;
   padding: 1rem;
   margin-bottom: 1rem;
-  border: 1px solid rgba(239, 68, 68, 0.2);
+  border: 1px solid var(--border-section);
 }
 
 .waveform-grid {
@@ -874,7 +988,7 @@ function createAnother() {
 
 .waveform-bar {
   flex: 1;
-  background: linear-gradient(to top, #ef4444, #dc2626);
+  background: linear-gradient(to top, var(--accent-color), var(--accent-hover));
   border-radius: 1px;
   opacity: 0.3;
   transition: all 0.2s;
@@ -902,29 +1016,25 @@ function createAnother() {
   width: clamp(40px, 10vw, 56px);
   height: clamp(40px, 10vw, 56px);
   border-radius: 50%;
-
-  border: clamp(1.5px, 0.4vw, 2px) solid rgba(255, 255, 255, 0.2);
-  background: rgba(255, 255, 255, 0.05);
-  color: white;
-
-  display:contents;
+  border: clamp(1.5px, 0.4vw, 2px) solid var(--border-input);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  display: flex;
   align-items: center;
   justify-content: center;
-
   cursor: pointer;
   transition: transform 0.3s ease, background 0.3s ease;
-  
 }
 
-/* Scale icon inside the button */
 .transport-btn ion-icon,
 .transport-btn svg {
   font-size: clamp(1.2rem, 4vw, 1.6rem) !important;
+  display: block !important;
 }
 
-/* Touch-friendly hover / active states */
 .transport-btn:hover {
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--bg-input-focus);
+  border-color: var(--accent-color);
   transform: scale(1.05);
 }
 
@@ -932,21 +1042,14 @@ function createAnother() {
   transform: scale(0.95);
 }
 
-
-
-.transport-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: #ef4444;
-  transform: scale(1.05);
-}
-
 .transport-btn.play {
-  background: linear-gradient(135deg, #ef4444, #dc2626);
-  border-color: #dc2626;
+  background: linear-gradient(135deg, var(--accent-color), var(--accent-hover));
+  border-color: var(--accent-hover);
+  color: white;
 }
 
-.transport-btn.delete  {
-  border-color: rgba(239, 68, 68, 0.3);
+.transport-btn.delete {
+  border-color: var(--border-section);
 }
 
 .transport-btn.delete:hover {
@@ -964,18 +1067,18 @@ function createAnother() {
 }
 
 .time {
-  color: #ef4444;
+  color: var(--accent-color);
   font-weight: bold;
   min-width: 50px;
   text-align: center;
 }
 
 .time.total {
-  color: #6b7280;
+  color: var(--text-muted);
 }
 
 .time-separator {
-  color: #374151;
+  color: var(--text-muted);
 }
 
 .timeline-container {
@@ -986,13 +1089,13 @@ function createAnother() {
 .timeline {
   position: relative;
   height: 4px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--border-input);
   border-radius: 2px;
 }
 
 .timeline-progress {
   height: 100%;
-  background: linear-gradient(to right, #ef4444, #dc2626);
+  background: linear-gradient(to right, var(--accent-color), var(--accent-hover));
   border-radius: 2px;
   transition: width 0.1s linear;
   box-shadow: 0 0 10px rgba(239, 68, 68, 0.5);
@@ -1004,8 +1107,8 @@ function createAnother() {
   transform: translate(-50%, -50%);
   width: 12px;
   height: 12px;
-  background: #ef4444;
-  border: 2px solid white;
+  background: var(--accent-color);
+  border: 2px solid var(--text-primary);
   border-radius: 50%;
   box-shadow: 0 0 10px rgba(239, 68, 68, 0.8);
   transition: left 0.1s linear;
@@ -1019,7 +1122,6 @@ function createAnother() {
 .track-info-section {
   margin-bottom: 2rem;
   padding-top: 2rem;
-
 }
 
 .input-group {
@@ -1030,34 +1132,131 @@ function createAnother() {
   display: block;
   font-size: 0.75rem;
   font-weight: 600;
-  color: #9ca3af;
+  color: var(--text-secondary);
   letter-spacing: 0.1em;
   margin-bottom: 0.5rem;
   text-transform: uppercase;
   text-align: left;
+  width: 100%;
 }
 
 .studio-input {
   width: 100%;
   padding: clamp(0.5rem, .5vw, 0.75rem);
-  background: rgba(0, 0, 0, 0.5);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--bg-input);
+  border: 1px solid var(--border-input);
   border-radius: 0.5rem;
-  color: white;
+  color: var(--text-primary);
   font-size: clamp(0.875rem, .8vw, 1rem);
   transition: all 0.3s;
 }
 
 .studio-input:focus {
   outline: none;
-  border-color: #ef4444;
+  border-color: var(--accent-color);
   box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1);
-  background: rgba(0, 0, 0, 0.7);
+  background: var(--bg-input-focus);
 }
 
 .studio-input::placeholder {
-  color: #6b7280;
-  font-size:small;
+  color: var(--text-input-placeholder);
+  font-size: small;
+}
+
+/* ==================== Info Tooltip ==================== */
+.info-tooltip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  margin-left: auto;
+}
+
+.info-tooltip .info-icon {
+  font-size: 0.875rem;
+  color: #38bdf8;
+  align-content: center;
+}
+
+.light-mode .info-icon {
+  color: #0284c7;
+}
+
+.tooltip-content {
+  position: absolute;
+  bottom: 130%;
+  left: 0%; /* Changed from left: 50% to right: 0 */
+  transform: translateX(0); /* Reset transform */
+  width: 220px;
+  background: rgba(0, 0, 0, 0.95);
+  color: #fff;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  padding: 0.6rem 0.75rem;
+  border-radius: 0.5rem;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  z-index: 50;
+}
+
+.light-mode .tooltip-content {
+  background: rgba(15, 23, 42, 0.95);
+}
+
+.tooltip-content::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 9px; /* Changed from left: 90% to right: 10px */
+  transform: translateX(0); /* Reset transform */
+  border-width: 6px;
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.95) transparent transparent transparent;
+}
+
+.light-mode .tooltip-content::after {
+  border-color: rgba(15, 23, 42, 0.95) transparent transparent transparent;
+}
+
+.info-tooltip:hover .tooltip-content,
+.info-tooltip:focus-within .tooltip-content {
+  opacity: 1;
+  transform: translateY(-4px); /* Changed from translateX(-90%) translateY(-4px) */
+}
+
+.note-text {
+  font-size: 0.75rem;
+  color: var(--accent-color);
+  margin-top: 0.25rem;
+  line-height: 1.4;
+  padding: 0.3rem 0.5rem;
+  border-radius: 0.25rem;
+  font-style: italic;
+  text-align: start;
+}
+
+
+/* ==================== Image Upload ==================== */
+.filename-badge {
+  color: var(--text-primary);
+  background: var(--bg-input);
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+  border: 1px solid var(--border-input);
+}
+
+.remove-btn {
+  font-size: 0.875rem;
+  color: var(--accent-color);
+  text-decoration: underline;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.remove-btn:hover {
+  color: var(--accent-hover);
 }
 
 /* ==================== Export Section ==================== */
@@ -1071,8 +1270,8 @@ function createAnother() {
   align-items: center;
   gap: 0.75rem;
   padding: 1rem 2rem;
-  background: linear-gradient(135deg, #1d1d1d, #000000);
-  color: rgb(248, 248, 248);
+  background: linear-gradient(135deg, var(--accent-color), var(--accent-hover));
+  color: white;
   border: none;
   border-radius: 0.75rem;
   font-weight: 700;
@@ -1092,10 +1291,38 @@ function createAnother() {
   transform: translateY(0);
 }
 
+.export-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .status-message {
   margin-top: 1rem;
-  color: #017a2c;
+  color: var(--success-color);
   font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.link-indicator {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--success-color);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.preview-link {
+  text-decoration: underline;
+  color: var(--text-primary);
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  transition: color 0.3s;
+}
+
+.preview-link:hover {
+  color: var(--success-color);
 }
 
 /* ==================== Studio Footer ==================== */
@@ -1105,10 +1332,11 @@ function createAnother() {
   align-items: center;
   margin-top: 2rem;
   padding: 1rem;
-  background: rgba(0, 0, 0, 0.3);
+  background: var(--bg-footer);
   border-radius: 0.5rem;
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-secondary);
   font-size: xx-small;
+  backdrop-filter: blur(10px);
 }
 
 .indicator {
@@ -1116,7 +1344,7 @@ function createAnother() {
   align-items: center;
   gap: 0.5rem;
   font-size: 0.75rem;
-  color: #6b7280;
+  color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.1em;
 }
@@ -1124,7 +1352,7 @@ function createAnother() {
 .indicator-dot {
   width: 8px;
   height: 8px;
-  background: #10b981;
+  background: var(--success-color);
   border-radius: 50%;
   animation: pulse 2s ease-in-out infinite;
 }
@@ -1140,94 +1368,416 @@ function createAnother() {
   }
 }
 
-/* ==================== Responsive ==================== */
+.credits-subtext {
+  color: var(--text-muted);
+}
+
+/* ==================== Responsive Layout ==================== */
+
+/* Mobile First - Base styles for mobile */
 @media (max-width: 640px) {
-  .studio-panel {
-    padding: 1.5rem;
+  /* Container padding */
+  .app-container {
+    padding: 0.5rem;
   }
 
+  /* Header adjustments */
+  .studio-header {
+    margin-bottom: 0.75rem;
+    padding: 0.75rem 0.5rem;
+  }
+
+  .header-title {
+    font-size: 1.25rem;
+    letter-spacing: 0.02em;
+  }
+
+  /* Theme toggle - smaller on mobile */
+  .theme-toggle-capsule {
+    top: 0.5rem;
+    right: 0.5rem;
+ 
+  }
+
+  .toggle-track {
+    width: 65px;
+    height: 34px;
+  }
+
+  .toggle-slider {
+    width: 28px;
+    height: 28px;
+  }
+
+  .theme-toggle-capsule.light .toggle-slider {
+    transform: translateX(33px);
+  }
+
+  .slider-icon {
+    font-size: 16px !important;
+  }
+
+  .track-icon {
+    font-size: 14px !important;
+  }
+
+  .track-icon.moon {
+    left: 8px;
+  }
+
+  .track-icon.sun {
+    right: 8px;
+  }
+
+  /* Main panel */
+  .studio-panel {
+    padding: 1rem;
+    border-radius: 1rem;
+  }
+
+  /* Section headers */
+  .section-header {
+    font-size: 0.75rem;
+    margin-bottom: 1rem;
+    padding-bottom: 0.5rem;
+  }
+
+  .section-header ion-icon {
+    font-size: 1rem;
+  }
+
+  /* Recording section */
+  .recording-section {
+    margin-bottom: 1.5rem;
+  }
+
+  /* Microphone button */
   .mic-circle {
-    width: 100px;
-    height: 100px;
+    width: 90px;
+    height: 90px;
+  }
+
+  .mic-circle ion-icon {
+    font-size: 2.5rem !important;
+  }
+
+  .mic-status {
+    font-size: 0.65rem;
+  }
+
+  .recording-status {
+    font-size: 1rem;
+  }
+
+  /* Audio player */
+  .studio-player {
+    padding: 1rem;
+  }
+
+  .waveform-display {
+    padding: 0.75rem;
   }
 
   .waveform-grid {
-    height: 50px;
+    height: 45px;
+  }
+
+  /* Transport controls */
+  .transport-controls {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .transport-btn {
+    width: 44px;
+    height: 44px;
+  }
+
+  .transport-btn ion-icon {
+    font-size: 1.25rem !important;
+  }
+
+  .timecode {
+    font-size: 0.875rem;
+    gap: 0.5rem;
+    width: 100%;
+    order: -1;
+    margin-bottom: 0.5rem;
+  }
+
+  .time {
+    min-width: 40px;
+  }
+
+  /* Track info section */
+  .track-info-section {
+    padding-top: 1rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .input-group {
+    margin-bottom: 0.875rem;
+    margin-right: 1.5rem;
+  }
+
+  .input-label {
+    font-size: 0.7rem;
+    margin-bottom: 0.375rem;
+  }
+
+  .studio-input {
+    padding: 0.625rem;
+    font-size: 0.875rem;
+  }
+
+  .studio-input[type="password"] {
+    font-size: 1.125rem;
+  }
+
+  textarea.studio-input {
+    font-size: 0.875rem;
+  }
+
+  /* Tooltip adjustments */
+  .tooltip-content {
+    width: 180px;
+    font-size: 0.7rem;
+    padding: 0.5rem;
+  }
+
+  .info-icon {
+    font-size: 1rem;
+  }
+
+  /* Export section */
+  .export-section {
+    padding-top: 1rem;
+  }
+
+  .export-btn {
+    width: 100%;
+    padding: 0.875rem 1.5rem;
+    font-size: 0.75rem;
+  }
+
+  .export-btn ion-icon {
+    font-size: 1.25rem !important;
+  }
+
+  .status-message {
+    font-size: 0.75rem;
+  }
+
+  .preview-link {
+    font-size: 0.75rem;
+  }
+
+  /* Footer */
+  .studio-footer {
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0.75rem;
+    margin-top: 1rem;
+    text-align: center;
+  }
+
+  .indicator {
+    font-size: 0.65rem;
+  }
+
+  .indicator-dot {
+    width: 6px;
+    height: 6px;
+  }
+
+  .credits-subtext {
+    font-size: 0.65rem;
   }
 }
 
+/* Tablet styles */
+@media (min-width: 641px) and (max-width: 1023px) {
+  .app-container {
+    padding: 1rem;
+  }
 
-.info-tooltip {
-  margin-left: auto;   /* ⬅️ pushes it to the far right */
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  cursor: pointer;
+  .studio-panel {
+    padding: 1.75rem;
+  }
+
+  .header-title {
+    font-size: 1.5rem;
+  }
+
+  .mic-circle {
+    width: 110px;
+    height: 110px;
+  }
+
+  .waveform-grid {
+    height: 55px;
+  }
+
+  .transport-btn {
+    width: 48px;
+    height: 48px;
+  }
+
+  .timecode {
+    font-size: 1rem;
+  }
 }
 
-.info-tooltip ion-icon {
-  font-size: 1.1rem;
-  color: #38bdf8; 
+/* Desktop styles */
+@media (min-width: 1024px) {
+  .studio-panel {
+    display: flex;
+    flex-direction: row;
+    gap: 3rem;
+    padding: 2.5rem;
+    flex-wrap: wrap; 
+  }
+
+  .recording-section {
+    flex: 1;
+    min-width: 280px;
+    max-width: 350px;
+    margin-top: 2rem;
+  }
+
+  .track-info-section {
+    flex: 2;
+    min-width: 400px;
+  }
+
+  .export-section {
+    flex-basis: 100%;
+    margin-top: 1.5rem;
+  }
+
+  .studio-mic-button {
+    margin: auto;
+  }
+
+  .mic-circle {
+    width: 140px;
+    height: 140px;
+  }
+
+  .waveform-grid {
+    height: 70px;
+  }
+
+  .transport-btn {
+    width: 56px;
+    height: 56px;
+  }
+
+  .timecode {
+    font-size: 1.125rem;
+  }
 }
 
-.input-label {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
+/* Large desktop optimization */
+@media (min-width: 1280px) {
+  .studio-panel {
+    gap: 4rem;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
 }
 
-/* Tooltip bubble */
-.tooltip-content {
-  position: absolute;
-  bottom: 130%;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 220px;
+/* Landscape mobile orientation */
+@media (max-width: 896px) and (orientation: landscape) {
+  .app-container {
+    padding: 0.5rem;
+  }
 
-  background: rgba(0, 0, 0, 0.9);
-  color: #fff;
-  font-size: 0.75rem;
-  line-height: 1.4;
+  .studio-header {
+    margin-bottom: 0.5rem;
+    padding: 0.5rem;
+  }
 
-  padding: 0.6rem 0.75rem;
-  border-radius: 0.5rem;
+  .header-title {
+    font-size: 1rem;
+  }
 
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.2s ease, transform 0.2s ease;
+  .studio-panel {
+    padding: 1rem;
+  }
 
-  z-index: 50;
+  .section-header {
+    font-size: 0.7rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .mic-circle {
+    width: 80px;
+    height: 80px;
+  }
+
+  .recording-section,
+  .track-info-section,
+  .export-section {
+    margin-bottom: 1rem;
+  }
+
+  .studio-footer {
+    padding: 0.5rem;
+    margin-top: 0.75rem;
+  }
 }
 
-/* Tooltip arrow */
-.tooltip-content::after {
-  content: "";
-  position: absolute;
-  top: 100%;
-  left: 90%;
-  transform: translateX(-50%);
-  border-width: 6px;
-  border-style: solid;
-  border-color: rgba(0, 0, 0, 0.9) transparent transparent transparent;
+/* Touch device optimizations */
+@media (hover: none) and (pointer: coarse) {
+  /* Increase touch targets */
+  .transport-btn,
+  .export-btn,
+  .theme-toggle-capsule,
+  .studio-mic-button {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  /* Prevent hover effects on touch */
+  .transport-btn:hover,
+  .mic-circle:hover,
+  .theme-toggle-capsule:hover {
+    transform: none;
+  }
+
+  /* Active/tap feedback instead */
+  .transport-btn:active {
+    transform: scale(0.95);
+  }
+
+  .mic-circle:active {
+    transform: scale(0.98);
+  }
+
+  .theme-toggle-capsule:active {
+    transform: scale(0.96);
+  }
+
+  /* Increase input padding for easier tapping */
+  .studio-input {
+    padding: 0.75rem;
+  }
 }
 
-/* Show on hover & focus (mobile friendly) */
-.info-tooltip:hover .tooltip-content,
-.info-tooltip:focus-within .tooltip-content {
-  opacity: 1;
-  transform: translateX(-90%) translateY(-4px);
+/* High resolution displays */
+@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+  .timeline {
+    height: 6px;
+  }
+
+  .playhead {
+    width: 14px;
+    height: 14px;
+  }
+
+  .waveform-bar {
+    border-radius: 2px;
+  }
 }
-
-.note-text {
-  font-size: 0.75rem; /* small text, like text-xs */
-  color: rgb(248, 9, 9); /* gray-400 / subtle */
-  margin-top: 0.25rem;
-  line-height: 1.4;
-  padding: 0.3rem 0.5rem;
-  border-radius: 0.25rem;
-  font-style: italic;
-  text-align: start;
-}
-
-
 </style>
