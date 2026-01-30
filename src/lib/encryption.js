@@ -14,6 +14,42 @@ export function generateSalt() {
   return CryptoJS.lib.WordArray.random(128/8).toString();
 }
 
+// ==================== TEXT ENCRYPTION ====================
+
+// Encrypt text (for title and message)
+export function encryptText(text, encryptionKey) {
+  if (!text) return null;
+  
+  try {
+    const encrypted = CryptoJS.AES.encrypt(text, encryptionKey).toString();
+    return encrypted;
+  } catch (error) {
+    console.error("Text encryption error:", error);
+    throw error;
+  }
+}
+
+// Decrypt text (for title and message)
+export function decryptText(encryptedText, encryptionKey) {
+  if (!encryptedText) return null;
+  
+  try {
+    const decrypted = CryptoJS.AES.decrypt(encryptedText, encryptionKey);
+    const plaintext = decrypted.toString(CryptoJS.enc.Utf8);
+    
+    if (!plaintext) {
+      throw new Error("Invalid PIN or corrupted data");
+    }
+    
+    return plaintext;
+  } catch (error) {
+    console.error("Text decryption error:", error);
+    throw error;
+  }
+}
+
+// ==================== BINARY ENCRYPTION ====================
+
 // Encrypt audio blob with PIN-derived key
 // Encrypt binary data with PIN-derived key (mobile-safe)
 export async function encryptAudioBlob(input, encryptionKey) {

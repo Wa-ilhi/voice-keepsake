@@ -9,7 +9,7 @@ import { Swiper, SwiperSlide } from "swiper/vue";
 import "swiper/css";
 import { gsap } from "gsap";
 import paperTexture from "../assets/crumbled.jpg";
-import { decryptAudioBlob, deriveKeyFromPin } from '../lib/encryption';
+import { decryptAudioBlob, deriveKeyFromPin, decryptText } from '../lib/encryption';
 
 
 const route = useRoute();
@@ -173,6 +173,31 @@ async function loadKeepsakes() {
       // Skip legacy records with missing salt
       if (!k.encryption_key) throw new Error("This keepsake has no salt");
 
+      // 🔐 Derive decryption key once (used for all decryption)
+      const decryptionKey = deriveKeyFromPin(
+        enteredPin.value,
+        k.encryption_key
+      );
+
+      // 🔹 Decrypt title and message (TEXT DECRYPTION)
+      if (k.title) {
+        try {
+          k.title = decryptText(k.title, decryptionKey);
+        } catch (err) {
+          console.error("Title decryption failed:", err);
+          k.title = "[Encrypted]"; // Fallback
+        }
+      }
+      
+      if (k.message) {
+        try {
+          k.message = decryptText(k.message, decryptionKey);
+        } catch (err) {
+          console.error("Message decryption failed:", err);
+          k.message = "[Encrypted]"; // Fallback
+        }
+      }
+
       // 🔹 Decrypt audio if it exists
       if (k.audio_path) {
         const { data: encryptedBlob, error: downloadError } =
@@ -182,29 +207,22 @@ async function loadKeepsakes() {
 
         if (downloadError) throw downloadError;
 
-        const decryptionKey = deriveKeyFromPin(
-          enteredPin.value,
-          k.encryption_key
-        );
-
         const decryptedBlob = await decryptAudioBlob(encryptedBlob, decryptionKey);
         k.audioUrl = URL.createObjectURL(decryptedBlob);
       }
 
-      // 🔹 Fetch signed URL for image if it exists
+      // 🔹 Decrypt image if it exists
       if (k.image_path) {
-            const { data: encryptedBlob, error: downloadError } =
-              await supabase.storage
-                .from("keepsake-images")
-                .download(k.image_path);
+        const { data: encryptedBlob, error: downloadError } =
+          await supabase.storage
+            .from("keepsake-images")
+            .download(k.image_path);
 
-            if (downloadError) throw downloadError;
+        if (downloadError) throw downloadError;
 
-            const decryptionKey = deriveKeyFromPin(enteredPin.value, k.encryption_key);
-
-            const decryptedBlob = await decryptAudioBlob(encryptedBlob, decryptionKey);
-            k.imageUrl = URL.createObjectURL(decryptedBlob);
-          }
+        const decryptedBlob = await decryptAudioBlob(encryptedBlob, decryptionKey);
+        k.imageUrl = URL.createObjectURL(decryptedBlob);
+      }
 
 
       // Initialize audio playback state
@@ -298,11 +316,7 @@ const keypadButtonStyle = computed(() => {
       };
 });
 
-// Hover effect (inline JS way, can also use Tailwind)
-const keypadHoverStyle = {
-  filter: 'brightness(1.2)', // brighten on hover
-  cursor: 'pointer',
-};
+
 
 function onAudioFinish(id) {
   if (repeatMode.value === 1) {
@@ -376,7 +390,6 @@ function clearPin() {
 
 onMounted(loadKeepsake);
 </script>
-
 <template>
   <div
     class="min-h-screen bg-gradient-to-br from-purple-100 via-pink-100 to-rose-100 flex items-center justify-center px-4 py-6"

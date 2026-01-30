@@ -2,7 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { supabase } from '../lib/supabase'
 import bcrypt from 'bcryptjs'
-import { encryptAudioBlob, deriveKeyFromPin, generateSalt } from '../lib/encryption';
+import { encryptAudioBlob, deriveKeyFromPin, generateSalt, encryptText, decryptText } from '../lib/encryption';
 
 // Theme state
 const isDarkMode = ref(true)
@@ -27,6 +27,7 @@ const chunks = ref([])
 const audioUrl = ref(null)
 const audioBlob = ref(null)
 
+const username = ref('')
 const title = ref('')
 const message = ref('')
 const pin = ref('')
@@ -181,7 +182,7 @@ async function saveKeepsake() {
   try {
     const id = crypto.randomUUID();
 
-    status.value = '🔐 Generating encryption keys...';
+    status.value = 'Generating encryption keys...';
 
     // Generate unique salt for this keepsake
     const salt = generateSalt();
@@ -199,7 +200,7 @@ async function saveKeepsake() {
     // Upload encrypted audio
     // -----------------------------
   if (audioBlob.value) {
-  status.value = '🔐 Encrypting audio...';
+  status.value = 'Encrypting audio...';
 
   const audioArrayBuffer = await normalizeToArrayBuffer(audioBlob.value);
 
@@ -215,7 +216,7 @@ async function saveKeepsake() {
 
   audioPath = `${id}_encrypted.enc`;
 
-  status.value = '📤 Uploading encrypted audio...';
+  status.value = 'Uploading encrypted audio...';
 
   const { error: uploadError } = await supabase.storage
     .from('keepsake-audio')
@@ -236,7 +237,7 @@ async function saveKeepsake() {
     // Upload encrypted image
     // -----------------------------
     if (imageFile.value) {
-      status.value = '🔐 Encrypting image...';
+      status.value = 'Encrypting image...';
 
       const encryptedImageArrayBuffer = await encryptAudioBlob(
         imageFile.value.buffer,
@@ -250,7 +251,7 @@ async function saveKeepsake() {
 
       imagePath = `${id}_img_encrypted.enc`;
 
-      status.value = '📤 Uploading encrypted image...';
+      status.value = 'Uploading encrypted image...';
 
       const { error: imgError } = await supabase.storage
         .from('keepsake-images')
@@ -270,12 +271,17 @@ async function saveKeepsake() {
     // -----------------------------
     // Save metadata in DB
     // -----------------------------
-    status.value = '💾 Saving keepsake...';
+    status.value = 'Saving keepsake...';
+
+    // Encrypt title and message
+    const encryptedTitle = title.value ? encryptText(title.value, encryptionKey) : null;
+    const encryptedMessage = message.value ? encryptText(message.value, encryptionKey) : null;
 
     const { error } = await supabase.from('keepsakes').insert({
       id,
-      title: title.value,
-      message: message.value,
+      username: username.value || 'Anonymous',
+      title: encryptedTitle, // ✅ Encrypted
+      message: encryptedMessage, // ✅ Encrypted
       audio_path: audioPath,
       image_path: imagePath,
       pin_hashed: pinHash,
@@ -316,30 +322,30 @@ async function saveKeepsake() {
 }, 1000);
 }
 
-async function copyLink() {
-  try {
-    await navigator.clipboard.writeText(shareableLink.value);
-    copied.value = true;
-    setTimeout(() => {
-      copied.value = false;
-    }, 2000);
-  } catch (err) {
-    console.log('Copy failed:', err);
-  }
-}
+// async function copyLink() {
+//   try {
+//     await navigator.clipboard.writeText(shareableLink.value);
+//     copied.value = true;
+//     setTimeout(() => {
+//       copied.value = false;
+//     }, 2000);
+//   } catch (err) {
+//     console.log('Copy failed:', err);
+//   }
+// }
 
-function createAnother() {
-  shareableLink.value = '';
-  savedPin.value = '';
-  audioBlob.value = null;
-  imageFile.value = null;
-  imageUrl.value = null;
-  pin.value = '';
-  title.value = '';
-  message.value = '';
-  status.value = '';
-  isSaved.value = false;
-}
+// function createAnother() {
+//   shareableLink.value = '';
+//   savedPin.value = '';
+//   audioBlob.value = null;
+//   imageFile.value = null;
+//   imageUrl.value = null;
+//   pin.value = '';
+//   title.value = '';
+//   message.value = '';
+//   status.value = '';
+//   isSaved.value = false;
+// }
 
 
 </script>
@@ -479,6 +485,15 @@ function createAnother() {
           </div>
 
           <div class="space-y-4 mt-4">
+             <div class="input-group">
+              <label class="input-label">Username</label>
+              <input
+                v-model="username"
+                placeholder="Enter your name or nickname"
+                class="studio-input"
+              />
+            </div>
+
             <div class="input-group">
               <label class="input-label">Salutation</label>
               <input
@@ -699,11 +714,11 @@ function createAnother() {
   right: 1rem;            /* distance from the right edge */
   margin: 0;              /* margin is not needed for sticky positioning */
   z-index: 100;           /* on top of other content */
-  
+  margin-left: 75%;
   background: rgba(0,0,0,0.5); /* optional floating look */
   border: none;
   border-radius: 9999px;  /* capsule shape */
-  padding: 0.5rem 0.75rem;
+  padding: 0.2rem 0.2rem;
   cursor: pointer;
   transition: transform 0.2s ease, background 0.2s ease;
 }
@@ -1684,6 +1699,11 @@ function createAnother() {
     gap: 3rem;
     padding: 2.5rem;
     flex-wrap: wrap; 
+  }
+
+  .theme-toggle-capsule {
+    margin-left: 90%;
+ 
   }
 
   .recording-section {
