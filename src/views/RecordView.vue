@@ -47,6 +47,11 @@ const shareableLink = ref('');
 const savedPin = ref('');
 const copied = ref(false);
 
+const uploadedAudioName = ref('')
+const audioMode = ref(null) 
+
+
+
 async function startRecording() {
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
   recorder.value = new MediaRecorder(stream, { mimeType: 'audio/webm' })
@@ -75,6 +80,37 @@ function removeImage() {
   imageName.value = "";
 }
 
+async function handleAudioUpload(e) {
+  if (audioMode.value !== 'upload') return
+  
+  const file = e.target.files[0]
+  if (!file) return
+
+  // Accept only audio
+  if (!file.type.startsWith('audio/')) {
+    alert('Please upload a valid audio file')
+    return
+  }
+
+  // Stop active playback
+  if (audioPlayerElement.value) {
+    audioPlayerElement.value.pause()
+  }
+
+  // Reset recorder data
+  recording.value = false
+  chunks.value = []
+
+
+  // Load audio into memory
+  const buffer = await file.arrayBuffer()
+  audioBlob.value = new Blob([buffer], { type: file.type })
+  audioUrl.value = URL.createObjectURL(audioBlob.value)
+
+  uploadedAudioName.value = file.name
+}
+
+
 
 function stopRecording() {
   recorder.value.stop()
@@ -91,6 +127,30 @@ const progressPercent = computed(() => {
   if (duration.value === 0) return 0;
   return (currentTime.value / duration.value) * 100;
 });
+
+function selectRecordMode() {
+  audioMode.value = 'record'
+
+  // Clear uploaded audio
+  uploadedAudioName.value = ''
+  audioBlob.value = null
+  audioUrl.value = null
+}
+
+function selectUploadMode() {
+  audioMode.value = 'upload'
+
+  // Stop recording if active
+  if (recorder.value && recording.value) {
+    recorder.value.stop()
+  }
+
+  chunks.value = []
+  recording.value = false
+  audioBlob.value = null
+  audioUrl.value = null
+}
+
 
 function togglePlayback() {
   if (!audioPlayerElement.value) return;
@@ -146,6 +206,8 @@ function deleteRecording() {
     }
     audioUrl.value = null;
     // audioFile.value = null;
+    audioMode.value = null
+    uploadedAudioName.value = ''
     isPlaying.value = false;
     currentTime.value = 0;
     duration.value = 0;
@@ -384,6 +446,9 @@ async function saveKeepsake() {
 
       <!-- Main Studio Panel -->
       <div class="studio-panel">
+
+
+
         
         <!-- Recording Section -->
         <div class="recording-section">
@@ -391,6 +456,25 @@ async function saveKeepsake() {
             <ion-icon name="mic-outline" class="text-xl"></ion-icon>
             <span>Recording Booth</span>
           </div>
+
+                    <!-- Audio Mode Selector -->
+            <div class="audio-mode-switch">
+              <button
+                @click="selectRecordMode"
+                :class="['audio-mode-btn', { active: audioMode === 'record' }]"
+              >
+                <ion-icon name="mic-outline"></ion-icon>
+                <span>Record</span>
+              </button>
+
+              <button
+                @click="selectUploadMode"
+                :class="['audio-mode-btn', { active: audioMode === 'upload' }]"
+              >
+                <ion-icon name="cloud-upload-outline"></ion-icon>
+                <span>Upload</span>
+              </button>
+            </div>
 
           <!-- Audio Player -->
           <div v-if="audioUrl" class="mt-6">
@@ -447,33 +531,49 @@ async function saveKeepsake() {
             </div>
           </div>
 
-          <div class="flex justify-center mt-6">
-            <button
-              v-if="!recording"
-              @click="startRecording"
-              class="studio-mic-button"
-            >
-              <div class="mic-circle">
-                <ion-icon name="mic" class="text-5xl"></ion-icon>
-              </div>
-              <span class="mic-status">PRESS TO RECORD</span>
-            </button>
+          <!-- Recording UI -->
+            <div v-if="audioMode === 'record'" class="flex justify-center mt-6">
+              <button
+                v-if="!recording"
+                @click="startRecording"
+                class="studio-mic-button"
+              >
+                <div class="mic-circle">
+                  <ion-icon name="mic" class="text-5xl"></ion-icon>
+                </div>
+                <span class="mic-status">PRESS TO RECORD</span>
+              </button>
 
-            <button
-              v-else
-              @click="stopRecording"
-              class="studio-mic-button recording"
-            >
-              <div class="mic-circle recording-active">
-                <ion-icon name="stop" class="text-5xl"></ion-icon>
-              </div>
-              <span class="mic-status">STOP RECORDING</span>
-            </button>
-            <div class="recording-status">
-              <span v-if="!recording" class="status-text">READY</span>
-              <span v-else class="status-text recording-live">● REC</span>
+              <button
+                v-else
+                @click="stopRecording"
+                class="studio-mic-button recording"
+              >
+                <div class="mic-circle recording-active">
+                  <ion-icon name="stop" class="text-5xl"></ion-icon>
+                </div>
+                <span class="mic-status">STOP RECORDING</span>
+              </button>
             </div>
-          </div>
+
+
+          <!-- Audio Upload -->
+            <div v-if="audioMode === 'upload'" class="input-group mt-6 text-center">
+                <label class="input-label">Select Audio File</label>
+
+                <input
+                  type="file"
+                  accept="audio/*"
+                  @change="handleAudioUpload"
+                  class="studio-input"
+                />
+
+                <p v-if="uploadedAudioName" class="note-text mt-2">
+                 
+                </p>
+              </div>
+
+
 
         </div>
 
@@ -706,6 +806,48 @@ async function saveKeepsake() {
   --accent-hover: #b91c1c;
   --success-color: #059669;
 }
+
+
+.audio-mode-switch {
+  display: flex;
+  width: 100%;
+  max-width: 360px;
+  margin: 1rem auto;
+  background: var(--bg-input);
+  border-radius: 999px;
+  padding: 0.25rem;
+  gap: 0.25rem;
+  border: 1px solid var(--border-input);
+}
+
+.audio-mode-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0.55rem 0;
+  font-size: 0.75rem;
+  border-radius: 999px;
+  color: var(--text-secondary);
+  background: transparent;
+  cursor: pointer;
+  transition: all 0.25s ease;
+}
+
+.audio-mode-btn ion-icon {
+  font-size: 1rem;
+}
+
+.audio-mode-btn.active {
+  background: linear-gradient(
+    135deg,
+    var(--accent-color),
+    var(--accent-hover)
+  );
+  color: #fff;
+}
+
 
 /* ==================== Theme Toggle Capsule Button ==================== */
 .theme-toggle-capsule {
